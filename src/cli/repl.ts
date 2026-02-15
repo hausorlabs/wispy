@@ -247,7 +247,7 @@ export async function startRepl(opts: ReplOpts) {
   registerChannel({
     name: "cli",
     type: "cli",
-    capabilities: { text: true, media: false, voice: false, buttons: false, reactions: false, groups: false, threads: false },
+    capabilities: { text: true, media: true, voice: false, buttons: false, reactions: false, groups: false, threads: false },
     status: "connected",
   });
 
@@ -350,6 +350,13 @@ export async function startRepl(opts: ReplOpts) {
 
     rl.pause();
     history.add(input);
+
+    // Re-display user input with background highlight (like Claude Code's green bar)
+    const cols = process.stdout.columns || 80;
+    const promptText = `❯ ${input}`;
+    const padded = promptText.padEnd(cols);
+    process.stdout.write(`\x1b[1A\x1b[2K`); // move up 1 line, clear it
+    console.log(chalk.bgRgb(30, 60, 40).white(padded));
 
     // ? shortcut
     if (input === "?") {

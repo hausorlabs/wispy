@@ -67,7 +67,8 @@ export type HistoryEntry =
   | { id: string; type: "x402-dashboard"; data: X402DashboardData }
   | { id: string; type: "x402-payment"; data: X402PaymentData }
   | { id: string; type: "verbose-toggle"; enabled: boolean }
-  | { id: string; type: "sandbox"; url: string; project: string; framework?: string };
+  | { id: string; type: "sandbox"; url: string; project: string; framework?: string }
+  | { id: string; type: "verification"; text: string };
 
 /** Distributive Omit for discriminated unions */
 type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;

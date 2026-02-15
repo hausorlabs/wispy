@@ -911,23 +911,44 @@ export class ToolExecutor {
     if (!imagePath) return { success: false, output: "", error: "No image path provided" };
     if (!existsSync(imagePath)) return { success: false, output: "", error: `Image not found: ${imagePath}` };
 
-    if (!this.currentChatContext?.sendImage) {
-      return {
-        success: false,
-        output: "",
-        error: "No chat context available. This tool only works when responding to a message in Telegram/WhatsApp.",
-      };
+    // Try direct chat context first (available when request came from Telegram/WhatsApp)
+    if (this.currentChatContext?.sendImage) {
+      try {
+        await this.currentChatContext.sendImage(imagePath, caption);
+        return {
+          success: true,
+          output: `Image sent to ${this.currentChatContext.channel}:${this.currentChatContext.peerId}\nPath: ${imagePath}${caption ? `\nCaption: ${caption}` : ""}`,
+        };
+      } catch (err: any) {
+        return { success: false, output: "", error: `Failed to send image: ${err.message}` };
+      }
     }
 
+    // Fallback: cross-channel dispatch via dock (CLI -> Telegram)
     try {
-      await this.currentChatContext.sendImage(imagePath, caption);
-      return {
-        success: true,
-        output: `Image sent to ${this.currentChatContext.channel}:${this.currentChatContext.peerId}\nPath: ${imagePath}${caption ? `\nCaption: ${caption}` : ""}`,
-      };
-    } catch (err: any) {
-      return { success: false, output: "", error: `Failed to send image: ${err.message}` };
-    }
+      const { getChannelDispatcher, getChannel } = await import("../channels/dock.js");
+      const telegramDispatcher = getChannelDispatcher("telegram");
+      const telegramChannel = getChannel("telegram");
+      if (telegramDispatcher && telegramChannel?.status === "connected") {
+        const chatId = process.env.TELEGRAM_CHAT_ID || process.env.WISPY_TELEGRAM_CHAT_ID;
+        if (chatId) {
+          const sent = await telegramDispatcher.sendImage(chatId, imagePath, caption);
+          if (sent) {
+            return {
+              success: true,
+              output: `Image sent to Telegram chat ${chatId} via cross-channel dispatch\nPath: ${imagePath}${caption ? `\nCaption: ${caption}` : ""}`,
+            };
+          }
+        }
+        return { success: false, output: "", error: "Telegram is connected but no TELEGRAM_CHAT_ID set. Set the env var to enable cross-channel image sending from CLI." };
+      }
+    } catch { /* dock import or dispatch failed -- fall through */ }
+
+    return {
+      success: false,
+      output: "",
+      error: "No chat context available and no connected Telegram channel found. Use this tool from Telegram, or set TELEGRAM_CHAT_ID to enable cross-channel dispatch.",
+    };
   }
 
   private async executeSendMessage(args: Record<string, unknown>): Promise<ToolResult> {

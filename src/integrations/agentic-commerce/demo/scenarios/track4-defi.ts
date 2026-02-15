@@ -45,8 +45,8 @@ export async function runTrack4(privateKey?: string): Promise<string> {
 
   // Research phase
   log(`━━━ Research Phase ━━━`);
-  const research = await defi.research("ETH");
-  log(`  ETH price: $${research.price}`);
+  const research = await defi.research("WETH");
+  log(`  WETH price: $${research.price}`);
   log(`  24h change: ${research.change24h > 0 ? "+" : ""}${research.change24h}%`);
   log(`  Volume: $${research.volume.toLocaleString()}`);
   log(`  Sources: ${research.sources.join(", ")}`);
@@ -54,18 +54,21 @@ export async function runTrack4(privateKey?: string): Promise<string> {
   log(``);
 
   // Trade 1: Small swap within limits (should be approved)
+  // "ETH" is resolved to WETH contract address by DeFiAgent
   const trade1Amount = isLive ? "0.001" : "0.1";
   log(`━━━ Trade 1: Small Swap (Within Limits) ━━━`);
   const swap1 = await defi.swap({
     fromToken: "USDC",
-    toToken: "ETH",
+    toToken: "WETH",
     amount: trade1Amount,
     reasoning: `Research shows ${research.change24h > 0 ? "positive" : "mixed"} movement. Small position to test market.`,
   });
   log(`  Decision: ${swap1.decision.approved ? "APPROVED" : "DENIED"}`);
   log(`  Risk score: ${swap1.decision.riskScore}/100`);
+  log(`  Method: ${swap1.method}`);
   if (swap1.success) {
-    log(`  Executed: ${swap1.amountIn} USDC -> ${swap1.amountOut} ETH`);
+    log(`  Executed: ${swap1.amountIn} USDC -> ${swap1.amountOut} WETH`);
+    log(`  Gas used: ${swap1.gasUsed}`);
     log(`  Tx: ${swap1.txHash?.slice(0, 20)}...`);
     if (swap1.txHash) log(`  Explorer: ${SKALE_BITE_SANDBOX.explorerUrl}/tx/${swap1.txHash}`);
   } else {
@@ -77,7 +80,7 @@ export async function runTrack4(privateKey?: string): Promise<string> {
   log(`━━━ Trade 2: Large Swap (Exceeds Position Limit) ━━━`);
   const swap2 = await defi.swap({
     fromToken: "USDC",
-    toToken: "ETH",
+    toToken: "WETH",
     amount: "1.0",
     reasoning: "Want to take a larger position in ETH.",
   });
@@ -92,15 +95,17 @@ export async function runTrack4(privateKey?: string): Promise<string> {
   log(`━━━ Trade 3: Adjusted Swap (Within Limits) ━━━`);
   const swap3 = await defi.swap({
     fromToken: "USDC",
-    toToken: "ETH",
+    toToken: "WETH",
     amount: trade3Amount,
     reasoning: "Reduced position size after previous denial. Risk-adjusted entry.",
   });
   log(`  Decision: ${swap3.decision.approved ? "APPROVED" : "DENIED"}`);
   log(`  Risk score: ${swap3.decision.riskScore}/100`);
   if (swap3.success) {
-    log(`  Executed: ${swap3.amountIn} USDC -> ${swap3.amountOut} ETH`);
+    log(`  Executed: ${swap3.amountIn} USDC -> ${swap3.amountOut} WETH`);
+    log(`  Method: ${swap3.method}`);
     if (swap3.txHash) {
+      log(`  Gas used: ${swap3.gasUsed}`);
       log(`  Tx: ${swap3.txHash.slice(0, 20)}...`);
       log(`  Explorer: ${SKALE_BITE_SANDBOX.explorerUrl}/tx/${swap3.txHash}`);
     }

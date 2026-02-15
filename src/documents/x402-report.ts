@@ -75,6 +75,13 @@ function texEscape(str: string): string {
     .replace(/\^/g, "\\textasciicircum{}");
 }
 
+/** Safely coerce any value to a number for .toFixed() calls */
+function safeNum(v: unknown): number {
+  if (typeof v === "number" && !isNaN(v)) return v;
+  const n = parseFloat(String(v));
+  return isNaN(n) ? 0 : n;
+}
+
 function texUrl(url: string): string {
   return `\\url{${url}}`;
 }
@@ -108,7 +115,7 @@ function generateReportLatex(data: X402ReportData): string {
   const transactionRows = data.transactions.map((tx, i) => {
     const num = i + 1;
     const svc = texEscape((tx.service || "unknown").slice(0, 20));
-    const amt = `\\$${tx.amount.toFixed(6)}`;
+    const amt = `\\$${safeNum(tx.amount).toFixed(6)}`;
     const st = texEscape(tx.status);
     const hash = tx.txHash && tx.txHash.startsWith("0x") && tx.txHash.length > 10
       ? txHashShort(tx.txHash)
@@ -141,7 +148,7 @@ function generateReportLatex(data: X402ReportData): string {
     parts.push("\\begin{" + boxType + "}[title=" + texEscape(t.title) + " --- " + t.status + "]");
     parts.push(texEscape(t.summary));
     if (t.payments) parts.push("\\\\[2mm]\\textbf{Payments:} " + t.payments);
-    if (t.spent) parts.push(" \\quad \\textbf{Spent:} \\$" + t.spent.toFixed(6) + " USDC");
+    if (t.spent) parts.push(" \\quad \\textbf{Spent:} \\$" + safeNum(t.spent).toFixed(6) + " USDC");
     if (t.toolCalls) parts.push(" \\quad \\textbf{Tool Calls:} " + t.toolCalls);
     parts.push("\\end{" + boxType + "}");
     return parts.join("\n");
@@ -158,15 +165,15 @@ function generateReportLatex(data: X402ReportData): string {
   const facilitatorField = data.facilitatorUrl
     ? "\\textbf{Facilitator:} & \\url{" + data.facilitatorUrl + "} \\\\[1mm]\n" : "";
   const budgetField = data.budgetRemaining !== undefined
-    ? "\\textbf{Budget Remaining:} & \\$" + data.budgetRemaining.toFixed(6) + " USDC \\\\[1mm]\n" : "";
+    ? "\\textbf{Budget Remaining:} & \\$" + safeNum(data.budgetRemaining).toFixed(6) + " USDC \\\\[1mm]\n" : "";
   const turnsField = data.demoTurns ? "\\textbf{Demo Turns:} & " + data.demoTurns + " \\\\[1mm]\n" : "";
   const durationField = data.duration ? "\\textbf{Duration:} & " + texEscape(data.duration) + " \\\\\n" : "";
   const sellerVerify = data.sellerAddress
     ? "\\textbf{Seller Wallet:}\\\\\n{\\small\\url{" + data.explorerUrl + "/address/" + data.sellerAddress + "}}\n\n\\vspace{2mm}\n" : "";
   const dailyLimitField = data.dailyLimit
-    ? "\\textbf{Daily Limit:} & \\$" + data.dailyLimit.toFixed(2) + " \\\\[1mm]\n" : "";
+    ? "\\textbf{Daily Limit:} & \\$" + safeNum(data.dailyLimit).toFixed(2) + " \\\\[1mm]\n" : "";
   const budgetRemField = data.budgetRemaining !== undefined
-    ? "\\textbf{Budget Remaining:} & \\$" + data.budgetRemaining.toFixed(6) + " \\\\\n" : "";
+    ? "\\textbf{Budget Remaining:} & \\$" + safeNum(data.budgetRemaining).toFixed(6) + " \\\\\n" : "";
   const txLinksSection = txLinks
     ? "\n\\subsection{Transaction Verification Links}\n\nEach transaction hash links directly to its on-chain record:\n\n\\begin{description}[leftmargin=1cm, labelwidth=1.2cm, style=unboxed]\n" + txLinks + "\n\\end{description}\n" : "";
 
@@ -288,7 +295,7 @@ function generateReportLatex(data: X402ReportData): string {
   parts.push("      \\small Network: \\textcolor{wispyorange}{\\textbf{" + texEscape(data.network) + "}} \\quad");
   parts.push("      Chain: \\textcolor{wispymagenta}{\\textbf{" + data.chainId + "}} \\quad");
   parts.push("      Protocol: \\textcolor{wispycyan}{\\textbf{x402 + AP2}}\\\\[0.3cm]");
-  parts.push("      \\small Total Spent: \\textcolor{passgreen}{\\textbf{\\$" + data.totalSpent.toFixed(6) + " USDC}} \\quad");
+  parts.push("      \\small Total Spent: \\textcolor{passgreen}{\\textbf{\\$" + safeNum(data.totalSpent).toFixed(6) + " USDC}} \\quad");
   parts.push("      Transactions: \\textbf{" + data.totalTransactions + "}");
   parts.push("    };");
   parts.push("  \\end{tikzpicture}");
@@ -378,7 +385,7 @@ function generateReportLatex(data: X402ReportData): string {
   parts.push("\\textbf{Network:} & " + texEscape(data.network) + " (Chain " + data.chainId + ") \\\\[1mm]");
   parts.push("\\textbf{Explorer:} & \\url{" + data.explorerUrl + "} \\\\[1mm]");
   if (facilitatorField) parts.push(facilitatorField);
-  parts.push("\\textbf{Total Spent:} & \\$" + data.totalSpent.toFixed(6) + " USDC \\\\[1mm]");
+  parts.push("\\textbf{Total Spent:} & \\$" + safeNum(data.totalSpent).toFixed(6) + " USDC \\\\[1mm]");
   parts.push("\\textbf{Transactions:} & " + data.totalTransactions + " \\\\[1mm]");
   if (budgetField) parts.push(budgetField);
   if (turnsField) parts.push(turnsField);
@@ -430,8 +437,8 @@ function generateReportLatex(data: X402ReportData): string {
     parts.push("\\centering");
     parts.push("\\begin{tabularx}{\\textwidth}{@{} l Y @{}}");
     parts.push("\\textbf{Total Transactions:} & " + data.totalTransactions + " \\\\[1mm]");
-    parts.push("\\textbf{Total USDC Spent:} & \\$" + data.totalSpent.toFixed(6) + " \\\\[1mm]");
-    parts.push("\\textbf{Average per Tx:} & \\$" + (data.totalTransactions > 0 ? (data.totalSpent / data.totalTransactions).toFixed(6) : "0.000000") + " \\\\[1mm]");
+    parts.push("\\textbf{Total USDC Spent:} & \\$" + safeNum(data.totalSpent).toFixed(6) + " \\\\[1mm]");
+    parts.push("\\textbf{Average per Tx:} & \\$" + (data.totalTransactions > 0 ? (safeNum(data.totalSpent) / data.totalTransactions).toFixed(6) : "0.000000") + " \\\\[1mm]");
     if (dailyLimitField) parts.push(dailyLimitField);
     if (budgetRemField) parts.push(budgetRemField);
     parts.push("\\end{tabularx}");
@@ -487,7 +494,7 @@ function generateReportLatex(data: X402ReportData): string {
   parts.push("\\begin{enumerate}[leftmargin=*]");
   parts.push("  \\item \\textbf{Autonomously initiated} by the AI agent without human intervention");
   parts.push("  \\item \\textbf{Settled on-chain} on the " + texEscape(data.network) + " network (gasless via sFUEL)");
-  parts.push("  \\item \\textbf{Budget-constrained} by the commerce policy engine (daily limit: \\$" + (data.dailyLimit ?? 100).toFixed(2) + ")");
+  parts.push("  \\item \\textbf{Budget-constrained} by the commerce policy engine (daily limit: \\$" + safeNum(data.dailyLimit ?? 100).toFixed(2) + ")");
   parts.push("  \\item \\textbf{Independently verifiable} via the SKALE block explorer links above");
   parts.push("  \\item \\textbf{Service-discovered} --- the agent found and chose services autonomously");
   parts.push("\\end{enumerate}");

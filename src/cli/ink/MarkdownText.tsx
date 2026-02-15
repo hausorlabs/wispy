@@ -191,9 +191,10 @@ function markdownToElements(raw: string, color: string): React.ReactNode[] {
     }
 
     // ── Table rows ──
-    if (line.includes("|") && line.trim().startsWith("|")) {
-      // Separator row like |---|---|
-      if (/^\|[\s\-:|]+\|$/.test(line.trim())) {
+    // Match lines with 2+ pipe-separated cells (with or without leading |)
+    if (line.includes("|") && (line.trim().startsWith("|") || (line.split("|").length >= 3 && tableRows.length > 0))) {
+      // Separator row like |---|---| or ---|---
+      if (/^[\s|]*[\-:|]+(\|[\s\-:|]+)+[\s|]*$/.test(line.trim())) {
         tableHasHeader = true;
         continue;
       }
@@ -201,8 +202,19 @@ function markdownToElements(raw: string, color: string): React.ReactNode[] {
         .split("|")
         .filter((c) => c.trim())
         .map((c) => c.trim());
-      if (cells.length > 0) tableRows.push(cells);
+      if (cells.length >= 2) tableRows.push(cells);
       continue;
+    }
+    // Start of table: line with 2+ pipes that isn't box-drawing
+    if (line.includes("|") && line.split("|").length >= 3 && !line.match(/[┌┐└┘├┤│─━╔╗╚╝]/)) {
+      const cells = line
+        .split("|")
+        .filter((c) => c.trim())
+        .map((c) => c.trim());
+      if (cells.length >= 2) {
+        tableRows.push(cells);
+        continue;
+      }
     }
 
     // If we were accumulating table rows, flush them

@@ -20,6 +20,8 @@ export interface X402Service {
   method: "GET" | "POST";
   category: "data" | "analytics" | "defi" | "infrastructure" | "ai";
   provider: "local" | "external";
+  /** Which chain this service accepts payment on */
+  network?: "skale" | "base";
   exampleBody?: string;
   exampleParams?: string;
 }
@@ -44,17 +46,19 @@ export function getLocalServices(sellerAddress: string): X402Service[] {
       method: "GET",
       category: "data",
       provider: "local",
+      network: "skale",
       exampleParams: "?city=Nairobi",
     },
     {
       name: "Sentiment Analysis",
-      url: `${baseUrl}:${DEMO_PORTS.sentiment}/sentiment`,
+      url: `${baseUrl}:${DEMO_PORTS.sentiment}/analyze`,
       description: "AI-powered text sentiment analysis. Returns sentiment score, label, and key phrases.",
       price: SERVICE_PRICING.sentiment.price,
       priceDisplay: SERVICE_PRICING.sentiment.display,
       method: "POST",
       category: "analytics",
       provider: "local",
+      network: "skale",
       exampleBody: '{"text":"Your text to analyze"}',
     },
     {
@@ -66,6 +70,7 @@ export function getLocalServices(sellerAddress: string): X402Service[] {
       method: "POST",
       category: "analytics",
       provider: "local",
+      network: "skale",
       exampleBody: '{"data":[],"format":"summary"}',
     },
   ];
@@ -78,33 +83,36 @@ export function getExternalServices(): X402Service[] {
     {
       name: "CoinGecko Pro API",
       url: "https://pro-api.coingecko.com/api/v3/simple/price",
-      description: "Premium crypto price data with 1-min granularity. Supports 10K+ tokens.",
+      description: "Premium crypto price data with pay-per-query pricing on Base. Supports 10K+ tokens.",
       price: "5000",
       priceDisplay: "$0.005",
       method: "GET",
       category: "defi",
       provider: "external",
+      network: "base",
       exampleParams: "?ids=bitcoin,ethereum&vs_currencies=usd",
     },
     {
       name: "Bazaar Marketplace",
       url: "https://bazaar.computer/api/services",
-      description: "x402 service marketplace. Browse and discover paid AI and data services.",
+      description: "x402 service marketplace on Base. Browse and discover paid AI and data services.",
       price: "0",
       priceDisplay: "Free (browsing)",
       method: "GET",
       category: "infrastructure",
       provider: "external",
+      network: "base",
     },
     {
       name: "Cloudflare AI Gateway",
       url: "https://gateway.ai.cloudflare.com/v1",
-      description: "AI inference endpoints with x402 billing. Access LLMs, image models, and embeddings.",
+      description: "AI inference endpoints with x402 billing on Base. Access LLMs, image models, and embeddings.",
       price: "10000",
       priceDisplay: "$0.01",
       method: "POST",
       category: "ai",
       provider: "external",
+      network: "base",
     },
   ];
 }
@@ -144,6 +152,7 @@ export function formatServiceCatalog(result: ServiceDiscoveryResult): string {
     lines.push(`${service.name} [${service.provider.toUpperCase()}]`);
     lines.push(`  URL: ${service.url}${service.exampleParams || ""}`);
     lines.push(`  Method: ${service.method}`);
+    lines.push(`  Network: ${service.network === "base" ? "Base Mainnet" : service.network === "skale" ? "SKALE BITE V2" : "Any"}`);
     lines.push(`  Price: ${service.priceDisplay} USDC/call`);
     lines.push(`  Category: ${service.category}`);
     lines.push(`  Description: ${service.description}`);

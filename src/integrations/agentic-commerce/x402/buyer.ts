@@ -13,7 +13,7 @@ import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import { privateKeyToAccount } from "viem/accounts";
 import type { PrivateKeyAccount } from "viem/accounts";
-import { SKALE_BITE_SANDBOX, COMMERCE_DEFAULTS, atomicToUsdc } from "../config.js";
+import { SKALE_BITE_SANDBOX, COMMERCE_DEFAULTS, BASE_COMMERCE_DEFAULTS, BASE_MAINNET, atomicToUsdc } from "../config.js";
 import type { SpendTracker } from "./tracker.js";
 import type { CDPWalletProvider } from "../../../wallet/cdp-wallet.js";
 
@@ -35,6 +35,8 @@ export interface BuyerConfig {
   dailyLimit?: number;
   /** Optional CDP wallet provider for custody + signing */
   cdpWallet?: CDPWalletProvider;
+  /** x402 networks to register (defaults to SKALE only) */
+  enabledNetworks?: Array<`${string}:${string}`>;
 }
 
 export interface PaymentEvent {
@@ -43,6 +45,8 @@ export interface PaymentEvent {
   amountUsdc: number;
   recipient: string;
   txHash?: string;
+  /** CAIP-2 network identifier (e.g. "eip155:8453" for Base) */
+  network?: string;
   timestamp: string;
   status: "success" | "failed" | "skipped";
   reason?: string;
@@ -57,6 +61,7 @@ export class X402Buyer {
   private readonly autoApproveBelow: number;
   private readonly dailyLimit: number;
   private readonly history: PaymentEvent[] = [];
+  private readonly enabledNetworks: Array<`${string}:${string}`>;
   private readonly walletProvider: "cdp" | "raw";
   private readonly cdpWalletId?: string;
   private tracker?: SpendTracker;
@@ -74,15 +79,20 @@ export class X402Buyer {
       this.walletProvider = "raw";
     }
 
-    this.maxPaymentAmount = config.maxPaymentAmount ?? COMMERCE_DEFAULTS.maxPerTransaction;
-    this.autoApproveBelow = config.autoApproveBelow ?? COMMERCE_DEFAULTS.autoApproveBelow;
-    this.dailyLimit = config.dailyLimit ?? COMMERCE_DEFAULTS.dailyLimit;
+    // Use stricter defaults when Base mainnet is among enabled networks
+    const networks = config.enabledNetworks ?? [SKALE_BITE_SANDBOX.network];
+    this.enabledNetworks = networks;
+    const hasBase = networks.some((n) => n === BASE_MAINNET.network);
+    const defaults = hasBase ? BASE_COMMERCE_DEFAULTS : COMMERCE_DEFAULTS;
+    this.maxPaymentAmount = config.maxPaymentAmount ?? defaults.maxPerTransaction;
+    this.autoApproveBelow = config.autoApproveBelow ?? defaults.autoApproveBelow;
+    this.dailyLimit = config.dailyLimit ?? defaults.dailyLimit;
 
     // Create x402 client with EVM exact scheme (EIP-3009)
     const client = new x402Client();
     registerExactEvmScheme(client, {
       signer: this.account,
-      networks: [SKALE_BITE_SANDBOX.network],
+      networks,
     });
 
     // Capture payment details from x402 lifecycle hook
@@ -191,17 +201,6 @@ export class X402Buyer {
     throw lastErr ?? new Error("Payment failed after retries");
   }
 
-  /** Generate a deterministic tx hash from payment details when no real hash is available */
-  private generateTxHash(url: string, amount: string, payTo: string, timestamp: string): `0x${string}` {
-    // Create a deterministic hash from payment details
-    const input = `${url}:${amount}:${payTo}:${timestamp}:${this.address}`;
-    let hash = 0n;
-    for (let i = 0; i < input.length; i++) {
-      hash = ((hash << 5n) - hash + BigInt(input.charCodeAt(i))) & ((1n << 256n) - 1n);
-    }
-    return `0x${hash.toString(16).padStart(64, "0")}` as `0x${string}`;
-  }
-
   /** Record a captured payment from the x402 lifecycle hook */
   private recordCapturedPayment(
     url: string,
@@ -216,11 +215,11 @@ export class X402Buyer {
 
     const amountUsdc = atomicToUsdc(captured.amount);
 
-    // Prefer real tx hash from server, generate deterministic one as fallback
-    let txHash = response.headers.get("x-payment-tx");
-    if (!txHash || txHash === "settled" || !txHash.startsWith("0x") || txHash.length < 10) {
-      txHash = this.generateTxHash(url, captured.amount, captured.payTo, captured.timestamp || timestamp);
-    }
+    // Only use a real tx hash from the server — never fabricate one
+    const rawHash = response.headers.get("x-payment-tx");
+    const txHash = rawHash && rawHash.startsWith("0x") && rawHash.length >= 66
+      ? rawHash
+      : undefined;
 
     const event: PaymentEvent = {
       url,
@@ -228,6 +227,7 @@ export class X402Buyer {
       amountUsdc,
       recipient: captured.payTo,
       txHash,
+      network: captured.network,
       timestamp: captured.timestamp || timestamp,
       status: "success",
       reason,
@@ -243,6 +243,7 @@ export class X402Buyer {
         amount: amountUsdc,
         recipient: captured.payTo,
         txHash: event.txHash ?? "0x0",
+        network: captured.network,
         status: "settled",
         reason,
       });
@@ -276,9 +277,13 @@ export class X402Buyer {
 
   /** Get budget status summary */
   getBudgetStatus(): string {
+    const networkNames = this.enabledNetworks.map((n) =>
+      n === BASE_MAINNET.network ? "Base Mainnet" : "SKALE BITE V2"
+    );
     return [
       `Wallet: ${this.address}`,
       `Provider: ${this.walletProvider === "cdp" ? `CDP Server Wallet (${this.cdpWalletId ?? "managed"})` : "Raw Key (viem)"}`,
+      `Networks: ${networkNames.join(", ")}`,
       `Daily limit: $${this.dailyLimit.toFixed(2)} USDC`,
       `Spent today: $${this.getDailySpent().toFixed(6)} USDC`,
       `Remaining: $${this.getRemainingBudget().toFixed(6)} USDC`,

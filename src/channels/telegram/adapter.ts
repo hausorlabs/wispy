@@ -5,7 +5,7 @@
  */
 
 import { Bot, type Context } from "grammy";
-import { registerChannel, updateChannelStatus, broadcastChannelEvent } from "../dock.js";
+import { registerChannel, updateChannelStatus, broadcastChannelEvent, registerChannelDispatcher } from "../dock.js";
 import { isPaired, pairUser } from "../../security/auth.js";
 import type { Agent } from "../../core/agent.js";
 import { createLogger } from "../../infra/logger.js";
@@ -134,6 +134,60 @@ export async function sendTelegramAudio(chatId: string, audioPath: string, title
   }
 }
 
+/**
+ * Send an image to a specific chat (for cross-channel dispatch from CLI)
+ */
+export async function sendTelegramImage(chatId: string, imagePath: string, caption?: string): Promise<boolean> {
+  if (!botInstance) {
+    log.warn("Telegram bot not initialized, cannot send image");
+    return false;
+  }
+  try {
+    const { InputFile } = await import("grammy");
+    const { readFileSync, existsSync } = await import("fs");
+    if (!existsSync(imagePath)) {
+      log.warn({ imagePath }, "Image file not found");
+      return false;
+    }
+    await botInstance.api.sendPhoto(
+      chatId,
+      new InputFile(readFileSync(imagePath), "image.png"),
+      caption ? { caption, parse_mode: "Markdown" } : undefined
+    );
+    return true;
+  } catch (err) {
+    log.error({ err }, "Failed to send Telegram image");
+    return false;
+  }
+}
+
+/**
+ * Send a document to a specific chat (for cross-channel dispatch from CLI)
+ */
+export async function sendTelegramDocument(chatId: string, filePath: string, caption?: string): Promise<boolean> {
+  if (!botInstance) {
+    log.warn("Telegram bot not initialized, cannot send document");
+    return false;
+  }
+  try {
+    const { InputFile } = await import("grammy");
+    const { createReadStream, existsSync } = await import("fs");
+    if (!existsSync(filePath)) {
+      log.warn({ filePath }, "Document file not found");
+      return false;
+    }
+    await botInstance.api.sendDocument(
+      chatId,
+      new InputFile(createReadStream(filePath)),
+      caption ? { caption, parse_mode: "Markdown" } : undefined
+    );
+    return true;
+  } catch (err) {
+    log.error({ err }, "Failed to send Telegram document");
+    return false;
+  }
+}
+
 // Track names for x402 demos
 const DEMO_TRACK_NAMES: Record<number, string> = {
   1: "Overall Best Agentic App",
@@ -200,6 +254,21 @@ Steps:
 3. Use bite_lifecycle_report with the payment_id to show the full encryption lifecycle
 
 IMPORTANT: Include all transaction proof links and encryption status. Say "TRACK 5 COMPLETE" when done.`,
+
+  6: `You are demonstrating Agentic Vision for the SF Agentic Commerce Hackathon — Gemini 3's visual reasoning combined with autonomous payments.
+
+SCENARIO: A fleet management AI agent receives a dashboard showing 12 vehicles across Nairobi. It must visually analyze the data, identify issues, reason about costs, and autonomously pay for services to resolve them.
+
+Steps:
+1. Use x402_discover_services to find available APIs
+2. Explain your visual analysis: "I see 12 vehicles, 3 alerts: low tire pressure on KBZ-412H, overdue service on KCA-889J, low fuel on KBB-201F. The cost analysis shows KES 12,450 fuel spend today with KES 3,200 potential savings."
+3. Use x402_pay_and_fetch to GET weather from http://127.0.0.1:4021/weather?city=Nairobi (reason: "Check weather before rerouting low-fuel vehicle to nearest station")
+4. Use x402_pay_and_fetch to POST route analysis to http://127.0.0.1:4022/analyze with body {"text":"Nairobi traffic Westlands route for fleet vehicle KBB-201F fuel stop"} (reason: "Optimize rerouting path for fuel savings")
+5. Use x402_pay_and_fetch to POST alert dispatch to http://127.0.0.1:4023/report with body {"format":"fleet_alert","alerts":["Reroute KBB-201F to Shell Westlands","Schedule KCA-889J service"]} (reason: "Dispatch maintenance alerts to fleet manager")
+6. Use x402_check_budget to show total spend and remaining budget
+7. Summarize: "Vision flow: Think (analyze dashboard) -> Observe (3 alerts, cost data) -> Act (3 API calls) -> Pay ($0.003 USDC). ROI: KES 3,200 saved in fuel/maintenance."
+
+IMPORTANT: Always use 127.0.0.1 (not localhost). Frame every action as vision-driven reasoning. Say "TRACK 6 COMPLETE" when done.`,
 };
 
 // SKALE explorer base for tx hash extraction
@@ -1247,7 +1316,7 @@ I work autonomously and keep you updated! 🚀`;
     }
     if (data === "demo_all") {
       await ctx.answerCallbackQuery("Running all tracks via agent...");
-      await runAgentDemoInTelegram(ctx, [1, 2, 3, 4, 5], agent);
+      await runAgentDemoInTelegram(ctx, [1, 2, 3, 4, 5, 6], agent);
       return;
     }
     if (data === "demo_preflight") {
@@ -2017,18 +2086,18 @@ I work autonomously and keep you updated! 🚀`;
 
     // Run all
     if (args === "all") {
-      await runAgentDemoInTelegram(ctx, [1, 2, 3, 4, 5], agent);
+      await runAgentDemoInTelegram(ctx, [1, 2, 3, 4, 5, 6], agent);
       return;
     }
 
     // Single track
-    const trackNum = /^[1-5]$/.test(args) ? parseInt(args) : 0;
-    if (trackNum >= 1 && trackNum <= 5) {
+    const trackNum = /^[1-6]$/.test(args) ? parseInt(args) : 0;
+    if (trackNum >= 1 && trackNum <= 6) {
       await runAgentDemoInTelegram(ctx, [trackNum], agent);
       return;
     }
 
-    await ctx.reply("Usage: /x402demo [1-5|all|preflight|stop]");
+    await ctx.reply("Usage: /x402demo [1-6|all|preflight|stop]");
   });
 
   // /x402scan - Scan wallet transactions
@@ -3261,6 +3330,13 @@ I work autonomously and keep you updated! 🚀`;
         },
         status: "connected",
         connectedAt: new Date().toISOString(),
+      });
+
+      // Register cross-channel dispatcher so CLI can send to Telegram
+      registerChannelDispatcher("telegram", {
+        sendMessage: sendTelegramMessage,
+        sendImage: sendTelegramImage,
+        sendDocument: sendTelegramDocument,
       });
     },
   });

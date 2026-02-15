@@ -330,7 +330,7 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
   },
   {
     name: "send_image_to_chat",
-    description: "Send an image file back to the user in the current chat (Telegram/WhatsApp). Use after taking screenshots or generating images.",
+    description: "Send an image file to the user via Telegram or WhatsApp. Works from ANY channel -- if called from CLI it dispatches to the user's connected Telegram. Always use this after generating images when the user asks to send them.",
     parameters: {
       type: "object",
       properties: {

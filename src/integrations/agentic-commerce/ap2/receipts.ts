@@ -146,14 +146,14 @@ export function formatReceiptMarkdown(record: AP2TransactionRecord): string {
     `  ┌─ AP2 Transaction ─────────────────`,
     `  │`,
     `  │ Intent`,
-    `  │   ID:          ${record.intent.id.slice(0, 20)}...`,
-    `  │   Agent:       ${record.intent.agentId.slice(0, 12)}...`,
+    `  │   ID:          ${record.intent.id}`,
+    `  │   Agent:       ${record.intent.agentId}`,
     `  │   Description: ${record.intent.description}`,
     `  │   Max Budget:  $${record.intent.maxBudget} USDC`,
     `  │`,
     `  │ Cart`,
-    `  │   ID:       ${record.cart.id.slice(0, 20)}...`,
-    `  │   Merchant: ${record.cart.merchantName} (${record.cart.merchantAddress.slice(0, 10)}...)`,
+    `  │   ID:       ${record.cart.id}`,
+    `  │   Merchant: ${record.cart.merchantName} (${record.cart.merchantAddress})`,
   ];
 
   for (const item of record.cart.items) {
@@ -164,14 +164,14 @@ export function formatReceiptMarkdown(record: AP2TransactionRecord): string {
   lines.push(
     `  │`,
     `  │ Payment`,
-    `  │   ID:     ${record.payment.id.slice(0, 20)}...`,
-    `  │   Payer:  ${record.payment.payerAddress.slice(0, 12)}...`,
-    `  │   Payee:  ${record.payment.payeeAddress.slice(0, 12)}...`,
+    `  │   ID:     ${record.payment.id}`,
+    `  │   Payer:  ${record.payment.payerAddress}`,
+    `  │   Payee:  ${record.payment.payeeAddress}`,
     `  │   Amount: $${record.payment.amount} USDC`,
     `  │   Net:    ${record.payment.network}`,
     `  │`,
     `  │ Receipt  [${status}]`,
-    `  │   ID:     ${record.receipt.id.slice(0, 20)}...`,
+    `  │   ID:     ${record.receipt.id}`,
     `  │   Tx:     ${record.receipt.txHash}`,
   );
   if (record.receipt.blockNumber) {

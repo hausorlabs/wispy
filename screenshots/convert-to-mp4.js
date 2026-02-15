@@ -17,6 +17,9 @@ const files = [
   { name: 'anim-07-gemini-architecture', duration: 8 },
   { name: 'anim-08-payments-a2a', duration: 8 },
   { name: 'anim-09-finale', duration: 12 },
+  { name: 'anim-10-bottleneck', duration: 12 },
+  { name: 'anim-11-team-intro', duration: 8 },
+  { name: 'anim-12-closing', duration: 10 },
 ];
 
 const FPS = 30;

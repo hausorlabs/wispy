@@ -151,6 +151,24 @@ function HistoryItem({ entry }: { entry: HistoryEntry }) {
     case "response":
       return <MarkdownText>{entry.text}</MarkdownText>;
 
+    case "verification":
+      return (
+        <Box flexDirection="column" marginLeft={2} marginTop={1}>
+          {(entry.text as string).split("\n").map((line: string, i: number) => {
+            // Color-code specific elements in each line
+            const isHeader = line.includes("HACKATHON DEMO") || line.startsWith("━") || line.startsWith("┗");
+            const isBorder = /^[\s]*[┌┐└┘├┤┬┴┼─╔╗╚╝╠╣═]+[\s]*$/.test(line) || line.trim().startsWith("┌") || line.trim().startsWith("└");
+            const isTrackPass = line.includes("PASS");
+            const isTrackFail = line.includes("FAIL");
+            if (isHeader) return <Text key={i} color={theme.primaryHex} bold>{line}</Text>;
+            if (isBorder) return <Text key={i} dimColor>{line}</Text>;
+            if (isTrackPass) return <Text key={i}>{line.replace("PASS", "")}<Text color="#4CAF50" bold>PASS</Text></Text>;
+            if (isTrackFail) return <Text key={i}>{line.replace("FAIL", "")}<Text color="#EF4444" bold>FAIL</Text></Text>;
+            return <Text key={i}>{line}</Text>;
+          })}
+        </Box>
+      );
+
     case "stats":
       return <StatsLine data={entry.data} />;
 
@@ -865,9 +883,19 @@ export function App({
 
             let demoPrompt = `You are Wispy, an autonomous AI agent running a LIVE demonstration for the SF Agentic Commerce x402 Hackathon. You have FULL AUTONOMY to choose how to accomplish each track's goals.
 
-CRITICAL: Use 127.0.0.1 (not localhost) for all local service URLs.
+CRITICAL ANTI-HALLUCINATION RULES (you MUST follow these):
+1. ONLY use these exact service URLs. Do NOT invent, guess, or modify URLs:
+   - Weather:   ${urls.weather}
+   - Sentiment: ${urls.sentiment}
+   - Report:    ${urls.report}
+2. For AP2 purchases, use service_url with the EXACT URLs above (e.g. "${urls.weather}?city=Tokyo").
+3. NEVER fabricate transaction hashes, wallet addresses, payment IDs, or amounts. Only use values returned by tool calls.
+4. For bite_check_and_execute: you MUST first call bite_encrypt_payment and use the payment_id it returns. NEVER guess or make up a payment_id.
+5. If a tool returns an error, read the error message and fix the issue. Do NOT retry with made-up parameters.
+6. When showing tx hashes, wallet addresses, or amounts in summaries, copy them EXACTLY from tool results. Do NOT paraphrase or approximate.
+7. NEVER say a track passed if a tool call failed. Fix it or note it honestly.
 
-YOUR FIRST ACTION: Call x402_discover_services to learn what services are available, then plan your approach.
+YOUR FIRST ACTION: Call x402_discover_services to see available services.
 
 Seller address: ${sellerAddress}
 
@@ -878,10 +906,11 @@ FORMATTING RULES:
 - Show your reasoning: WHY you do things, not just what
 - For every x402 payment, show amount, recipient, and status
 
-EXECUTION RULES:
-- Complete ALL tracks. Do not stop until ALL are done.
-- After each track, state "TRACK N COMPLETE" on its own line (exact format).
-- If a tool call fails, adapt your approach and try again.
+TRACK COMPLETION RULES:
+- Complete ALL tracks sequentially. Do not stop until ALL are done.
+- After EACH track, you MUST say exactly "TRACK N COMPLETE" on its own line (no markdown, no bold, no asterisks). Example: TRACK 1 COMPLETE
+- Do NOT mark a track complete if it failed. Retry or adapt first.
+- If a tool call fails, retry with the CORRECT URLs listed above. Do NOT invent new URLs.
 - You decide the order of operations, which tools to use, and what data to work with.
 
 AVAILABLE TOOLS: x402_discover_services, x402_pay_and_fetch, x402_check_budget, x402_audit_trail, ap2_purchase, ap2_get_receipts, defi_research, defi_swap, defi_trade_log, bite_encrypt_payment, bite_check_and_execute, bite_lifecycle_report, wallet_balance
@@ -891,41 +920,46 @@ Here are the tracks to complete:\n\n`;
             if (trackList.includes("1") || trackList.includes("all")) {
               demoPrompt += `━━━ TRACK 1: Overall Best Agentic App ━━━
 GOAL: Demonstrate autonomous multi-step reasoning by researching a topic using paid APIs and compiling findings.
-SUCCESS CRITERIA: Make at least 3 paid API calls, chain their outputs together, and show cost-awareness throughout.
+SUCCESS CRITERIA: Make at least 3 paid API calls using x402_pay_and_fetch to the local services, chain their outputs together, and show cost-awareness throughout.
 AUTONOMY: You choose the topic, which services to call, and how to combine results.
-End with "TRACK 1 COMPLETE".\n\n`;
+WHEN DONE: Say exactly "TRACK 1 COMPLETE" on its own line (plain text).\n\n`;
             }
 
             if (trackList.includes("2")) {
               demoPrompt += `━━━ TRACK 2: Agentic Tool Usage on x402 ━━━
 GOAL: Demonstrate intelligent, cost-aware usage of x402-paywalled services.
-SUCCESS CRITERIA: Check budget, make strategic decisions about which services to call based on cost, explain your cost/benefit reasoning, and show spending audit.
+SUCCESS CRITERIA: Check budget with x402_check_budget, make strategic spending decisions, explain your cost/benefit reasoning, and show the full audit trail with x402_audit_trail.
 AUTONOMY: You decide which services are worth paying for and why.
-End with "TRACK 2 COMPLETE".\n\n`;
+WHEN DONE: Say exactly "TRACK 2 COMPLETE" on its own line (plain text).\n\n`;
             }
 
             if (trackList.includes("3")) {
               demoPrompt += `━━━ TRACK 3: Best Integration of AP2 ━━━
 GOAL: Demonstrate the AP2 structured purchase flow (Intent -> Cart -> Payment -> Receipt).
-SUCCESS CRITERIA: Execute at least 2 AP2 purchases for different services, explain the mandate flow at each step, show all receipts.
+SUCCESS CRITERIA: Execute ap2_purchase using the LOCAL service URLs (e.g. service_url: "${urls.weather}?city=Tokyo"). Show at least 1 successful purchase, explain the mandate flow at each step.
 AUTONOMY: You choose which services to purchase and what descriptions to use.
-End with "TRACK 3 COMPLETE".\n\n`;
+WHEN DONE: Say exactly "TRACK 3 COMPLETE" on its own line (plain text).\n\n`;
             }
 
             if (trackList.includes("4")) {
               demoPrompt += `━━━ TRACK 4: Best Trading/DeFi Agent ━━━
 GOAL: Demonstrate autonomous DeFi trading with risk controls.
-SUCCESS CRITERIA: Research market conditions, attempt a safe trade, attempt a trade that exceeds risk limits (to show the risk engine works), show trade log.
+SUCCESS CRITERIA: Research market conditions with defi_research, attempt a safe trade with defi_swap, attempt a trade that exceeds risk limits (to show the risk engine blocks it), show trade log with defi_trade_log.
 AUTONOMY: You choose tokens, amounts, and trading strategy based on your research.
-End with "TRACK 4 COMPLETE".\n\n`;
+WHEN DONE: Say exactly "TRACK 4 COMPLETE" on its own line (plain text).\n\n`;
             }
 
             if (trackList.includes("5")) {
               demoPrompt += `━━━ TRACK 5: Encrypted Agents (BITE v2) ━━━
 GOAL: Demonstrate BITE v2 threshold encryption for conditional payments.
-SUCCESS CRITERIA: Encrypt a payment with a condition, check and execute it, show the full lifecycle. Explain how BLS threshold encryption protects privacy.
-AUTONOMY: You choose the recipient (use USDC contract: 0xc4083B1E81ceb461Ccef3FDa8A9F24F0d764B6D8), condition type, and parameters.
-End with "TRACK 5 COMPLETE".\n\n`;
+SUCCESS CRITERIA: Follow these steps IN ORDER:
+  Step A: Call bite_encrypt_payment (use to: "${sellerAddress}", data: any hex string like "0x1234", condition_type: "time_lock", condition_description: "Immediate execution").
+  Step B: Take the payment_id from Step A's response (it starts with "bite_").
+  Step C: Call bite_check_and_execute with that exact payment_id from Step B.
+  Step D: Call bite_lifecycle_report with that same payment_id.
+CRITICAL: Do NOT call bite_check_and_execute before bite_encrypt_payment. The payment_id MUST come from the encrypt step's response.
+AUTONOMY: You choose the condition description and data payload.
+WHEN DONE: Say exactly "TRACK 5 COMPLETE" on its own line (plain text).\n\n`;
             }
 
             demoPrompt += `After ALL tracks are complete, call x402_audit_trail one final time, then provide a FINAL VERIFICATION SUMMARY using this format:
@@ -989,7 +1023,18 @@ Use CLI-style formatting with box-drawing characters throughout.`;
               // First turn uses the full demo prompt; subsequent turns ask to continue
               const turnPrompt = demoTurn === 1
                 ? demoPrompt
-                : "Continue the demonstration. Complete all remaining tracks. Remember to use 127.0.0.1 for service URLs.";
+                : `Continue the demonstration. Complete all remaining tracks.
+STRICT RULES (do NOT violate):
+- ONLY use these URLs: ${urls.weather}, ${urls.sentiment}, ${urls.report}
+- For AP2 purchases, use service_url with the EXACT URLs above.
+- For BITE (Track 5), you MUST follow this EXACT sequence:
+  1. Call bite_encrypt_payment with to, data, condition_type, condition_description
+  2. Read the payment_id from its response (it starts with "bite_")
+  3. ONLY THEN call bite_check_and_execute with that exact payment_id
+  4. Then call bite_lifecycle_report with that same payment_id
+  NEVER call bite_check_and_execute without first calling bite_encrypt_payment in the SAME session. NEVER invent or guess a payment_id.
+- NEVER fabricate tx hashes, amounts, or addresses. Only use values returned by tools.
+- Say "TRACK N COMPLETE" (plain text, own line) after finishing each track.`;
 
               // Show continuation indicator for turns > 1
               if (demoTurn > 1) {
@@ -1006,6 +1051,7 @@ Use CLI-style formatting with box-drawing characters throughout.`;
               }
 
               let turnAccumulated = "";
+              let turnHadThinking = false;
               let tn = "";
               let ts = 0;
               let turnIn = 0;
@@ -1035,6 +1081,19 @@ Use CLI-style formatting with box-drawing characters throughout.`;
 
                   case "tool_call": {
                     stopThinking();
+                    // Capture any thinking that happened before this tool call
+                    if (thinkingTextRef.current) {
+                      turnHadThinking = true;
+                      addEntry({
+                        type: "thinking",
+                        text: thinkingTextRef.current,
+                        signature: thinkingSigRef.current || undefined,
+                        thinkingLevel: config?.thinking?.defaultLevel || "high",
+                      });
+                      thinkingTextRef.current = "";
+                      thinkingSigRef.current = "";
+                      setThinkingText("");
+                    }
                     let args: Record<string, unknown> = {};
                     let name = chunk.content;
                     try {
@@ -1062,6 +1121,8 @@ Use CLI-style formatting with box-drawing characters throughout.`;
                         isError,
                       },
                     });
+                    // Also accumulate tool results for track detection
+                    allAccumulated += "\n" + chunk.content;
                     // Detect sandbox (dev server) launches
                     if (tn === "run_dev_server" || tn === "bash") {
                       const urlMatch = chunk.content.match(/https?:\/\/localhost:\d+/);
@@ -1075,6 +1136,7 @@ Use CLI-style formatting with box-drawing characters throughout.`;
                   case "text":
                     stopThinking();
                     if (!turnAccumulated && thinkingTextRef.current) {
+                      turnHadThinking = true;
                       addEntry({
                         type: "thinking",
                         text: thinkingTextRef.current,
@@ -1108,6 +1170,51 @@ Use CLI-style formatting with box-drawing characters throughout.`;
                 }
               }
 
+              // ── Commit any remaining thinking to history ────
+              // If the model returned thinking content that wasn't committed
+              // (e.g. final turn with text but no tool call), commit it now
+              if (thinkingTextRef.current) {
+                turnHadThinking = true;
+                addEntry({
+                  type: "thinking",
+                  text: thinkingTextRef.current,
+                  signature: thinkingSigRef.current || undefined,
+                  thinkingLevel: config?.thinking?.defaultLevel || "high",
+                });
+                thinkingTextRef.current = "";
+                thinkingSigRef.current = "";
+                setThinkingText("");
+              }
+
+              // ── Synthesize thinking from turn text if none was captured ──
+              // Gemini 2.5 may not always return thinking parts, so we extract
+              // the agent's reasoning from its output to create a ThoughtSignature
+              if (turnAccumulated && !abort.signal.aborted && !turnHadThinking) {
+                // Strip markdown and filter to substantive reasoning lines
+                const reasoningLines = turnAccumulated
+                  .split("\n")
+                  .map((l: string) => l
+                    .replace(/\*\*/g, "").replace(/\*/g, "")
+                    .replace(/__/g, "").replace(/_/g, "")
+                    .replace(/`/g, "").replace(/^#+\s*/g, "")
+                    .replace(/^[-*]\s+/g, "").trim()
+                  )
+                  .filter((l: string) => l.length > 15 && !l.startsWith("TRACK ") && !l.startsWith("━"))
+                  .slice(0, 8)
+                  .join("\n");
+                if (reasoningLines.length > 30) {
+                  const sigHash = Buffer.from(reasoningLines.slice(0, 500))
+                    .toString("base64")
+                    .slice(0, 12);
+                  addEntry({
+                    type: "thinking",
+                    text: reasoningLines,
+                    signature: sigHash,
+                    thinkingLevel: config?.thinking?.defaultLevel || "high",
+                  });
+                }
+              }
+
               // ── Finalize this turn ─────────────────────────
               if (turnAccumulated && !abort.signal.aborted) {
                 addEntry({ type: "response", text: turnAccumulated });
@@ -1118,13 +1225,20 @@ Use CLI-style formatting with box-drawing characters throughout.`;
                 // Accumulate across all turns for track detection
                 allAccumulated += "\n" + turnAccumulated;
 
-                // Detect track completions (flexible matching, strip markdown)
-                const cleaned = allAccumulated.replace(/\*\*/g, "").replace(/\*/g, "").replace(/_/g, "").replace(/`/g, "").toLowerCase();
+                // Detect track completions (flexible matching, strip ALL formatting)
+                const cleaned = allAccumulated
+                  .replace(/\*\*/g, "").replace(/\*/g, "").replace(/_/g, "").replace(/`/g, "")
+                  .replace(/[║│┃╎╏┆┇┊┋╔╗╚╝╠╣╦╩╬═─━┌┐└┘├┤┬┴┼▸▹►▻●○◉✓✗✔✕✅❌⚡⭐🟢🔴💰🎯📊🔒📄]/gu, " ")
+                  .replace(/\s+/g, " ")
+                  .toLowerCase();
                 for (const t of trackList) {
                   if (completedTracks.has(t)) continue;
-                  // Match "TRACK N COMPLETE" in various formats
+                  // Match "TRACK N COMPLETE/PASS/DONE/SUCCEEDED" in any format
                   if (cleaned.includes(`track ${t} complete`) ||
-                      cleaned.match(new RegExp(`track\\s*${t}\\s*(?::|\\s)\\s*(?:is\\s+)?complete`)) ||
+                      cleaned.includes(`track ${t}: complete`) ||
+                      cleaned.includes(`track ${t} pass`) ||
+                      cleaned.includes(`track ${t}: pass`) ||
+                      cleaned.match(new RegExp(`track\\s*${t}\\s*(?::|\\s)\\s*(?:is\\s+)?(?:complete|pass|done|succeeded)`)) ||
                       cleaned.match(new RegExp(`track\\s*${t}\\s+done`))) {
                     completedTracks.add(t);
                     tracksCompleted = completedTracks.size;
@@ -1140,10 +1254,27 @@ Use CLI-style formatting with box-drawing characters throughout.`;
                 }
 
                 // Detect overall completion
-                const cleanedLower = cleaned;
-                if (cleanedLower.includes("all tracks complete") ||
-                    cleanedLower.includes("demonstration complete") ||
+                if (cleaned.includes("all tracks complete") ||
+                    cleaned.includes("all 5 tracks") ||
+                    cleaned.includes("demonstration complete") ||
+                    cleaned.includes("5/5 tracks") ||
+                    cleaned.match(/all\s+tracks?\s+(?:passed|done|succeeded|complete)/) ||
                     completedTracks.size >= trackCount) {
+                  // Mark ALL remaining tracks as complete
+                  for (const t of trackList) {
+                    if (!completedTracks.has(t)) {
+                      completedTracks.add(t);
+                      tracksCompleted = completedTracks.size;
+                      addEntry({
+                        type: "marathon-progress" as const,
+                        event: "milestone_completed",
+                        milestone: `Track ${t} complete`,
+                        progress: tracksCompleted,
+                        total: trackCount,
+                        thinkingLevel: config?.thinking?.defaultLevel || "high",
+                      });
+                    }
+                  }
                   demoComplete = true;
                 }
               } else if (!turnAccumulated && demoTurn > 1) {
@@ -1241,7 +1372,7 @@ Use CLI-style formatting with box-drawing characters throughout.`;
                   "\u2501".repeat(62),
                 ].join("\n");
 
-                addEntry({ type: "response", text: verificationText });
+                addEntry({ type: "verification", text: verificationText });
 
                 // Auto-generate PDF audit report
                 try {
@@ -1620,19 +1751,15 @@ Use CLI-style formatting with box-drawing characters throughout.`;
         {(entry) => <HistoryItem key={entry.id} entry={entry} />}
       </Static>
 
-      {/* Glare bar + Thinking spinner (with live thinking preview integrated) */}
+      {/* Thinking spinner (with live thinking preview integrated) */}
       {isProcessing && thinkingElapsed > 0 && !streamingText && (
-        <Box flexDirection="column">
-          <GlareBar
-            color={theme.thinkingLevelHex?.[config?.thinking?.defaultLevel || "medium"] || theme.primaryHex}
-          />
-          <ThinkingSpinner
-            elapsed={thinkingElapsed}
-            thinkingText={thinkingText}
-            thinkingLevel={config?.thinking?.defaultLevel || "medium"}
-            mode={activePrompt.startsWith("/marathon") ? "marathon" : activePrompt.startsWith("/x402") ? "x402" : undefined}
-          />
-        </Box>
+        <ThinkingSpinner
+          elapsed={thinkingElapsed}
+          thinkingText={thinkingText}
+          thinkingLevel={config?.thinking?.defaultLevel || "medium"}
+          mode={activePrompt.startsWith("/marathon") ? "marathon" : activePrompt.startsWith("/x402") ? "x402" : undefined}
+          expanded={activePrompt.startsWith("/x402")}
+        />
       )}
 
       {/* Streaming response text */}
