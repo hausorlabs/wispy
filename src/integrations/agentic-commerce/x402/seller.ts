@@ -19,7 +19,9 @@ import {
   SKALE_BITE_SANDBOX,
   SERVICE_PRICING,
   DEMO_PORTS,
+  DEMO_PORT_DEFAULTS,
 } from "../config.js";
+import { findFreePort } from "../../../infra/ports.js";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -239,6 +241,11 @@ export async function startAllServices(sellerAddress: string): Promise<void> {
   if (runningServices.length > 0) {
     await stopAllServices();
   }
+
+  // Find free ports starting from defaults (allows multiple Wispy instances)
+  DEMO_PORTS.weather = await findFreePort(DEMO_PORT_DEFAULTS.weather);
+  DEMO_PORTS.sentiment = await findFreePort(DEMO_PORTS.weather + 1);
+  DEMO_PORTS.report = await findFreePort(DEMO_PORTS.sentiment + 1);
 
   const services: Array<{ name: string; port: number; app: Express }> = [
     {

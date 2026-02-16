@@ -9,7 +9,7 @@ import React from "react";
 import { render } from "ink";
 import { existsSync } from "fs";
 import { join } from "path";
-import { App } from "./App.js";
+import { App, registerInkClear } from "./App.js";
 import { loadEnv } from "../../infra/dotenv.js";
 import { loadConfig } from "../../config/config.js";
 import { loadOrCreateIdentity } from "../../security/device-identity.js";
@@ -32,6 +32,14 @@ export interface InkReplOpts {
 
 export async function startInkRepl(opts: InkReplOpts): Promise<void> {
   const { rootDir, runtimeDir, soulDir } = opts;
+
+  // ── Global error safety net — prevent stray EADDRINUSE / network errors
+  // from crashing the process (especially important for multi-instance) ──
+  process.on("uncaughtException", (err) => {
+    if ((err as NodeJS.ErrnoException).code === "EADDRINUSE") return; // swallow port conflicts
+    console.error("[wispy] Uncaught:", err.message);
+  });
+  process.on("unhandledRejection", () => {}); // swallow unhandled promise rejections
 
   // ── TTY check — fall back to readline REPL in non-interactive environments ──
   if (!process.stdin.isTTY) {
@@ -184,26 +192,56 @@ export async function startInkRepl(opts: InkReplOpts): Promise<void> {
     // Non-fatal: integrations are optional
   }
 
-  // ── Cron service ──
-  const { CronService } = await import("../../cron/service.js");
-  const cronService = new CronService(runtimeDir, agent);
-  cronService.start();
-  agent.setCronService(cronService);
+  // ── Multi-instance: primary lock ──────────────────────────────
+  // Only ONE instance owns shared services (Telegram, A2A, cron, reminders).
+  // Secondary instances run CLI + agent only, preventing port/file conflicts.
+  const { writeFileSync, unlinkSync, readFileSync } = await import("fs");
+  const lockPath = join(runtimeDir, "wispy.lock");
+  let isPrimary = false;
 
-  // ── Reminders ──
-  const { ReminderService } = await import(
-    "../../cron/reminders.js"
-  );
-  const reminderService = new ReminderService(runtimeDir);
-  reminderService.start();
-  agent.setReminderService(reminderService);
+  // Check if lock is stale (held by a dead process)
+  if (existsSync(lockPath)) {
+    try {
+      const lockPid = parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
+      try { process.kill(lockPid, 0); } catch { unlinkSync(lockPath); }
+    } catch { try { unlinkSync(lockPath); } catch {} }
+  }
 
-  // ── Marathon ──
+  if (!existsSync(lockPath)) {
+    try {
+      writeFileSync(lockPath, String(process.pid), "utf-8");
+      isPrimary = true;
+      const releaseLock = () => { try { unlinkSync(lockPath); } catch {} };
+      process.on("exit", releaseLock);
+      process.on("SIGINT", () => { releaseLock(); process.exit(0); });
+      process.on("SIGTERM", () => { releaseLock(); process.exit(0); });
+    } catch { /* lock write failed, run as secondary */ }
+  }
+
+  // ── Marathon (always — lightweight, no ports) ──
   const { MarathonService } = await import(
     "../../marathon/service.js"
   );
   const marathonSvc = new MarathonService(runtimeDir);
   agent.setMarathonService(marathonSvc, apiKeyStr);
+
+  // ── Primary-only services (cron, reminders, Telegram, A2A) ──
+  let cronService: any = null;
+  let reminderService: any = null;
+
+  if (isPrimary) {
+    // ── Cron service ──
+    const { CronService } = await import("../../cron/service.js");
+    cronService = new CronService(runtimeDir, agent);
+    cronService.start();
+    agent.setCronService(cronService);
+
+    // ── Reminders ──
+    const { ReminderService } = await import("../../cron/reminders.js");
+    reminderService = new ReminderService(runtimeDir);
+    reminderService.start();
+    agent.setReminderService(reminderService);
+  }
 
   // ── Channel registration ──
   registerChannel({
@@ -224,38 +262,43 @@ export async function startInkRepl(opts: InkReplOpts): Promise<void> {
   // ── Auto-start configured channels ──
   const startedChannels: string[] = ["cli"];
 
-  if (config.channels?.telegram?.enabled && config.channels.telegram.token) {
-    try {
-      const { startTelegram } = await import(
-        "../../channels/telegram/adapter.js"
-      );
-      startTelegram(
-        config.channels.telegram.token,
-        agent,
-        runtimeDir,
-        apiKeyStr,
-      );
-      startedChannels.push("telegram");
-    } catch {
-      // Non-fatal: Telegram is optional
+  // Telegram & A2A: primary instance only
+  if (isPrimary) {
+    if (config.channels?.telegram?.enabled && config.channels.telegram.token) {
+      try {
+        const { startTelegram } = await import(
+          "../../channels/telegram/adapter.js"
+        );
+        startTelegram(
+          config.channels.telegram.token,
+          agent,
+          runtimeDir,
+          apiKeyStr,
+        );
+        startedChannels.push("telegram");
+      } catch {
+        // Non-fatal: Telegram is optional
+      }
     }
-  }
 
-  // ── A2A server (agent-to-agent delegation) ──
-  try {
-    const { A2AServer } = await import("../../a2a/delegation.js");
-    const a2aServer = new A2AServer(runtimeDir, soulDir, config.agent.name, agent);
-    a2aServer.start(4002);
-    startedChannels.push("a2a");
-  } catch {
-    // Non-fatal: A2A is optional (requires express)
+    // ── A2A server ──
+    try {
+      const { A2AServer } = await import("../../a2a/delegation.js");
+      const { findFreePort } = await import("../../infra/ports.js");
+      const a2aPort = await findFreePort(4002);
+      const a2aServer = new A2AServer(runtimeDir, soulDir, config.agent.name, agent);
+      a2aServer.start(a2aPort);
+      startedChannels.push("a2a");
+    } catch {
+      // Non-fatal: A2A is optional
+    }
   }
 
   // ── Token manager ──
   const tokenManager = new TokenManager();
 
   // ── Render the Ink app ──
-  const { waitUntilExit } = render(
+  const { waitUntilExit, clear } = render(
     <App
       agent={agent}
       config={config}
@@ -268,18 +311,17 @@ export async function startInkRepl(opts: InkReplOpts): Promise<void> {
     />,
   );
 
+  // Register Ink's clear() so App can call it on resize
+  registerInkClear(clear);
+
   await waitUntilExit();
 
   // ── Cleanup ──
   try {
     mcpRegistry.stopAll();
   } catch {}
-  try {
-    cronService.stop();
-  } catch {}
-  try {
-    reminderService.stop();
-  } catch {}
+  if (cronService) try { cronService.stop(); } catch {}
+  if (reminderService) try { reminderService.stop(); } catch {}
   // Stop Telegram bot if running
   try {
     const { getTelegramBot } = await import(

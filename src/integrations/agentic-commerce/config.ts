@@ -231,13 +231,18 @@ export const BASE_COMMERCE_DEFAULTS = {
 } as const;
 
 // ─── Demo Server Ports ──────────────────────────────────────
+// Mutable so multiple Wispy instances can bind to different ports.
 
-export const DEMO_PORTS = {
+export const DEMO_PORT_DEFAULTS = {
   weather: 4021,
   sentiment: 4022,
   report: 4023,
   defi: 4024,
 } as const;
+
+export const DEMO_PORTS: { weather: number; sentiment: number; report: number; defi: number } = {
+  ...DEMO_PORT_DEFAULTS,
+};
 
 // ─── Network Helpers ────────────────────────────────────────
 

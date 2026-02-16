@@ -111,7 +111,7 @@ export default class AgenticCommerceIntegration extends Integration {
       {
         name: "ap2_purchase",
         description:
-          "Execute a full AP2 (Agent Payment Protocol) purchase flow: create intent mandate, receive cart from merchant, authorize payment, settle via x402, generate receipt. Use the service URLs from x402_discover_services (Weather: port 4021, Sentiment: port 4022, Report: port 4023). Service URLs will be auto-resolved if they don't match a running service.",
+          "Execute a full AP2 (Agent Payment Protocol) purchase flow: create intent mandate, receive cart from merchant, authorize payment, settle via x402, generate receipt. Use the service URLs from x402_discover_services to find the correct ports (they are dynamically assigned). Service URLs will be auto-resolved if they don't match a running service.",
         parameters: {
           type: "object",
           properties: {
@@ -838,6 +838,14 @@ export default class AgenticCommerceIntegration extends Integration {
 
     const paymentId = args.payment_id as string;
     if (!paymentId) return this.error("payment_id is required");
+
+    // Special case: "all" returns reports for all payments
+    if (paymentId === "all") {
+      const allPayments = this.encryptedCommerce.getAllPayments();
+      if (allPayments.length === 0) return this.ok("No BITE payments recorded.");
+      const reports = allPayments.map((p) => this.encryptedCommerce!.getReport(p.id));
+      return this.ok(reports.join("\n\n"));
+    }
 
     return this.ok(this.encryptedCommerce.getReport(paymentId));
   }

@@ -50,6 +50,7 @@ export interface Theme {
   primaryHex: string;
   accentHex: string;
   dimHex: string;
+  highlightBgHex: string;
   // Thinking level colors (hex for Ink)
   thinkingLevelHex: Record<string, string>;
   // Phase colors for marathon/background tasks
@@ -104,6 +105,7 @@ const dawn: Theme = {
   primaryHex: "#FF7F50",
   accentHex: "#FFB74D",
   dimHex: "#8B6050",
+  highlightBgHex: "#3C282D",
   thinkingLevelHex: {
     none: "#555555", minimal: "#6B7280", low: "#60A5FA",
     medium: "#FBBF24", high: "#F97316", ultra: "#EF4444",
@@ -137,6 +139,7 @@ const day: Theme = {
   primaryHex: "#31CCFF",
   accentHex: "#5E9FFF",
   dimHex: "#4A7A99",
+  highlightBgHex: "#283246",
   thinkingLevelHex: {
     none: "#555555", minimal: "#6B7280", low: "#60A5FA",
     medium: "#FBBF24", high: "#F97316", ultra: "#EF4444",
@@ -170,6 +173,7 @@ const dusk: Theme = {
   primaryHex: "#C864FF",
   accentHex: "#FF96C8",
   dimHex: "#7B4D99",
+  highlightBgHex: "#322341",
   thinkingLevelHex: {
     none: "#555555", minimal: "#6B7280", low: "#A78BFA",
     medium: "#FBBF24", high: "#F97316", ultra: "#EF4444",
@@ -203,6 +207,7 @@ const night: Theme = {
   primaryHex: "#6478C8",
   accentHex: "#4A5A9F",
   dimHex: "#3D4A7A",
+  highlightBgHex: "#1E2337",
   thinkingLevelHex: {
     none: "#555555", minimal: "#6B7280", low: "#818CF8",
     medium: "#FBBF24", high: "#F97316", ultra: "#EF4444",

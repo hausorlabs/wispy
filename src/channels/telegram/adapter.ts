@@ -199,13 +199,25 @@ const DEMO_TRACK_NAMES: Record<number, string> = {
 };
 
 // Agent-driven demo prompts per track (realistic use-case framing)
-const DEMO_AGENT_PROMPTS: Record<number, string> = {
+// Uses a function to resolve DEMO_PORTS at call time (supports dynamic ports for multi-instance)
+function getDemoPrompts(): Record<number, string> {
+  // Late import to get current dynamic ports
+  let wp = 4021, sp = 4022, rp = 4023;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const cfg = require("../../integrations/agentic-commerce/config.js");
+    wp = cfg.DEMO_PORTS?.weather ?? 4021;
+    sp = cfg.DEMO_PORTS?.sentiment ?? 4022;
+    rp = cfg.DEMO_PORTS?.report ?? 4023;
+  } catch { /* use defaults */ }
+
+  return {
   1: `You are demonstrating Wispy's autonomous agentic commerce capabilities for the SF x402 Hackathon.
 
 SCENARIO: A logistics company needs real-time weather data for route planning in Nairobi.
 
 Steps:
-1. Use x402_pay_and_fetch to call the Weather API at http://127.0.0.1:4021/weather?city=Nairobi (reason: "Real-time weather for logistics route optimization")
+1. Use x402_pay_and_fetch to call the Weather API at http://127.0.0.1:${wp}/weather?city=Nairobi (reason: "Real-time weather for logistics route optimization")
 2. Use x402_check_budget to show budget awareness
 3. Use x402_audit_trail to show the payment audit trail
 
@@ -216,9 +228,9 @@ IMPORTANT: Always use 127.0.0.1 (not localhost) for service URLs. Include explor
 SCENARIO: A market intelligence platform needs weather, sentiment, and summary reports.
 
 Steps:
-1. Use x402_pay_and_fetch to GET weather from http://127.0.0.1:4021/weather?city=Nairobi (reason: "Market weather correlation data")
-2. Use x402_pay_and_fetch to POST sentiment analysis to http://127.0.0.1:4022/analyze with body {"text":"SKALE blockchain enables gasless micro-payments for AI agents"} (reason: "Sentiment analysis for market intelligence")
-3. Use x402_pay_and_fetch to POST a report to http://127.0.0.1:4023/report with body {"format":"executive"} (reason: "Executive summary report generation")
+1. Use x402_pay_and_fetch to GET weather from http://127.0.0.1:${wp}/weather?city=Nairobi (reason: "Market weather correlation data")
+2. Use x402_pay_and_fetch to POST sentiment analysis to http://127.0.0.1:${sp}/analyze with body {"text":"SKALE blockchain enables gasless micro-payments for AI agents"} (reason: "Sentiment analysis for market intelligence")
+3. Use x402_pay_and_fetch to POST a report to http://127.0.0.1:${rp}/report with body {"format":"executive"} (reason: "Executive summary report generation")
 4. Use x402_check_budget to show remaining budget
 
 IMPORTANT: Always use 127.0.0.1 (not localhost). Include all explorer proof links. Say "TRACK 2 COMPLETE" when done.`,
@@ -228,7 +240,7 @@ IMPORTANT: Always use 127.0.0.1 (not localhost). Include all explorer proof link
 SCENARIO: An AI agent autonomously subscribes to a premium weather data service using structured AP2 mandates.
 
 Steps:
-1. Use ap2_purchase with description "Premium weather data subscription for fleet management", service_url "http://127.0.0.1:4021/weather", merchant_name "WeatherPro Analytics", max_budget "0.005"
+1. Use ap2_purchase with description "Premium weather data subscription for fleet management", service_url "http://127.0.0.1:${wp}/weather", merchant_name "WeatherPro Analytics", max_budget "0.005"
 2. Use ap2_get_receipts to show the full mandate chain (intent -> cart -> payment -> receipt)
 
 IMPORTANT: Include all transaction proof links and mandate IDs. Say "TRACK 3 COMPLETE" when done.`,
@@ -262,14 +274,15 @@ SCENARIO: A fleet management AI agent receives a dashboard showing 12 vehicles a
 Steps:
 1. Use x402_discover_services to find available APIs
 2. Explain your visual analysis: "I see 12 vehicles, 3 alerts: low tire pressure on KBZ-412H, overdue service on KCA-889J, low fuel on KBB-201F. The cost analysis shows KES 12,450 fuel spend today with KES 3,200 potential savings."
-3. Use x402_pay_and_fetch to GET weather from http://127.0.0.1:4021/weather?city=Nairobi (reason: "Check weather before rerouting low-fuel vehicle to nearest station")
-4. Use x402_pay_and_fetch to POST route analysis to http://127.0.0.1:4022/analyze with body {"text":"Nairobi traffic Westlands route for fleet vehicle KBB-201F fuel stop"} (reason: "Optimize rerouting path for fuel savings")
-5. Use x402_pay_and_fetch to POST alert dispatch to http://127.0.0.1:4023/report with body {"format":"fleet_alert","alerts":["Reroute KBB-201F to Shell Westlands","Schedule KCA-889J service"]} (reason: "Dispatch maintenance alerts to fleet manager")
+3. Use x402_pay_and_fetch to GET weather from http://127.0.0.1:${wp}/weather?city=Nairobi (reason: "Check weather before rerouting low-fuel vehicle to nearest station")
+4. Use x402_pay_and_fetch to POST route analysis to http://127.0.0.1:${sp}/analyze with body {"text":"Nairobi traffic Westlands route for fleet vehicle KBB-201F fuel stop"} (reason: "Optimize rerouting path for fuel savings")
+5. Use x402_pay_and_fetch to POST alert dispatch to http://127.0.0.1:${rp}/report with body {"format":"fleet_alert","alerts":["Reroute KBB-201F to Shell Westlands","Schedule KCA-889J service"]} (reason: "Dispatch maintenance alerts to fleet manager")
 6. Use x402_check_budget to show total spend and remaining budget
 7. Summarize: "Vision flow: Think (analyze dashboard) -> Observe (3 alerts, cost data) -> Act (3 API calls) -> Pay ($0.003 USDC). ROI: KES 3,200 saved in fuel/maintenance."
 
 IMPORTANT: Always use 127.0.0.1 (not localhost). Frame every action as vision-driven reasoning. Say "TRACK 6 COMPLETE" when done.`,
-};
+  };
+}
 
 // SKALE explorer base for tx hash extraction
 const SKALE_EXPLORER_BASE = "https://base-sepolia-testnet-explorer.skalenodes.com:10032";
@@ -337,7 +350,7 @@ async function runAgentDemoInTelegram(
 
   try {
     for (const trackNum of tracks) {
-      const prompt = DEMO_AGENT_PROMPTS[trackNum];
+      const prompt = getDemoPrompts()[trackNum];
       if (!prompt) {
         await ctx.reply(`\u26A0\uFE0F No agent prompt for Track ${trackNum}, skipping.`);
         continue;
@@ -3342,8 +3355,16 @@ I work autonomously and keep you updated! 🚀`;
   });
 
   bot.catch((err) => {
+    const msg = String(err);
+    // 409 Conflict = another bot instance took over this token (multi-instance)
+    if (msg.includes("409") || msg.includes("Conflict") || msg.includes("terminated by other")) {
+      log.warn("Telegram bot displaced by another instance, stopping gracefully");
+      updateChannelStatus("telegram", "disconnected", "displaced by another instance");
+      bot.stop().catch(() => {});
+      return;
+    }
     log.error({ err }, "Telegram bot error");
-    updateChannelStatus("telegram", "error", String(err));
+    updateChannelStatus("telegram", "error", msg);
   });
 
   return bot;

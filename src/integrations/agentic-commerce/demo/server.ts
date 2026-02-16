@@ -12,6 +12,11 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { startAllServices, stopAllServices } from "../x402/seller.js";
 import { DEMO_PORTS } from "../config.js";
 
+/** Dedup: track whether services are already running */
+let _running = false;
+let _sellerAddress = "";
+let _sellerKey = "";
+
 /** Wait for a service health endpoint to respond */
 async function waitForHealth(port: number, maxWaitMs = 5000): Promise<boolean> {
   const url = `http://127.0.0.1:${port}/health`;
@@ -28,10 +33,16 @@ async function waitForHealth(port: number, maxWaitMs = 5000): Promise<boolean> {
   return false;
 }
 
-/** Start all demo services with a fresh or provided seller key */
+/** Start all demo services with a fresh or provided seller key.
+ *  Idempotent: if already running, returns the existing seller info. */
 export async function startDemoServices(
   sellerPrivateKey?: string,
 ): Promise<{ sellerAddress: string; sellerKey: string }> {
+  // Dedup: return cached result if already started
+  if (_running && _sellerAddress) {
+    return { sellerAddress: _sellerAddress, sellerKey: _sellerKey };
+  }
+
   const key = sellerPrivateKey ?? generatePrivateKey();
   const account = privateKeyToAccount(key as `0x${string}`);
   const sellerAddress = account.address;
@@ -47,6 +58,9 @@ export async function startDemoServices(
     }
   }
 
+  _running = true;
+  _sellerAddress = sellerAddress;
+  _sellerKey = key;
   return { sellerAddress, sellerKey: key };
 }
 

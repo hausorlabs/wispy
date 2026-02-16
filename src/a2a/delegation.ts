@@ -134,8 +134,15 @@ export class A2AServer {
   }
 
   start(port: number) {
-    this.app.listen(port, () => {
+    const server = this.app.listen(port, () => {
       log.info("A2A server listening on port %d", port);
+    });
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        log.warn("A2A port %d in use, running without A2A server", port);
+      } else {
+        log.error("A2A server error: %s", err.message);
+      }
     });
   }
 

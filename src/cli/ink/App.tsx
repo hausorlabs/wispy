@@ -36,6 +36,12 @@ import type { TokenManager } from "../../token/estimator.js";
 import type { CommandDef } from "./command-registry.js";
 import { onChannelEvent } from "../../channels/dock.js";
 
+// ── Ink instance clear — called from ink-repl.tsx after render() ─
+// Ink's clear() resets its internal line tracking, which prevents
+// ghost renders when the terminal resizes on Windows Terminal.
+let _inkClear: (() => void) | null = null;
+export function registerInkClear(fn: () => void) { _inkClear = fn; }
+
 // ── Props ────────────────────────────────────────────────────────
 
 interface AppProps {
@@ -123,15 +129,16 @@ function HistoryItem({ entry }: { entry: HistoryEntry }) {
     case "separator":
       return <Separator />;
 
-    case "user-input":
+    case "user-input": {
+      const inputCols = process.stdout.columns || 80;
+      const prompt = `\u276F ${entry.text}`;
+      const padded = prompt.padEnd(inputCols);
       return (
         <Box marginTop={1}>
-          <Text bold color={color}>
-            {"\u276F"}{" "}
-          </Text>
-          <Text bold>{entry.text}</Text>
+          <Text bold backgroundColor={theme.highlightBgHex} color="white">{padded}</Text>
         </Box>
       );
+    }
 
     case "tool-call":
       return <ToolCall data={entry.data} />;
@@ -401,19 +408,16 @@ function PaletteRow({
 // Shows below the bottom separator when the palette is not open.
 // Left: keyboard shortcuts, Right: stats (model · tokens · cost · context bar · time · backend)
 
-function HintsBar({ cols, stats }: { cols: number; stats?: import("./types.js").StatsData | null }) {
+function HintsBar({ stats }: { stats?: import("./types.js").StatsData | null }) {
+  // Read terminal width live each render
+  const w = process.stdout.columns || 80;
   const left = " ctrl+c cancel  ctrl+o verbose  ctrl+e x402";
 
   if (!stats) {
     const right = "/ commands";
-    const gap = Math.max(1, cols - left.length - right.length);
-    return (
-      <Box>
-        <Text dimColor>{left}</Text>
-        <Text>{" ".repeat(gap)}</Text>
-        <Text dimColor>{right}</Text>
-      </Box>
-    );
+    const gap = Math.max(1, w - left.length - right.length);
+    const line = (left + " ".repeat(gap) + right).slice(0, w);
+    return <Text dimColor>{line}</Text>;
   }
 
   // Build context progress bar
@@ -423,8 +427,8 @@ function HintsBar({ cols, stats }: { cols: number; stats?: import("./types.js").
   const barFilled = "\u2588".repeat(filled);
   const barEmpty = "\u2591".repeat(empty);
 
-  // Calculate right side length for gap spacing
-  const rightText = [
+  // Build right side as a single string
+  const rightParts = [
     stats.model,
     `${stats.tokens.toLocaleString()} tk`,
     `$${stats.cost.toFixed(4)}`,
@@ -434,30 +438,13 @@ function HintsBar({ cols, stats }: { cols: number; stats?: import("./types.js").
     ...(stats.backend ? [`[${stats.backend}]`] : []),
   ].join(" \u00b7 ");
 
-  const gap = Math.max(1, cols - left.length - rightText.length);
+  const gap = Math.max(1, w - left.length - rightParts.length);
 
-  return (
-    <Box>
-      <Text dimColor>{left}</Text>
-      <Text>{" ".repeat(gap)}</Text>
-      <Text color="#7B61FF">{stats.model}</Text>
-      <Text dimColor> {"\u00b7"} </Text>
-      <Text color="#FFB74D">{stats.tokens.toLocaleString()} tk</Text>
-      <Text dimColor> {"\u00b7"} </Text>
-      <Text color="#4CAF50">${stats.cost.toFixed(4)}</Text>
-      <Text dimColor> {"\u00b7"} </Text>
-      <Text color="green">{barFilled}</Text>
-      <Text dimColor>{barEmpty} {stats.contextPercent}%</Text>
-      <Text dimColor> {"\u00b7"} </Text>
-      <Text color="#FF7F50">{stats.elapsed}s</Text>
-      {stats.mode && stats.mode !== "chat" && (
-        <Text dimColor> {"\u00b7"} <Text color="yellow">[{stats.mode}]</Text></Text>
-      )}
-      {stats.backend && (
-        <Text dimColor> {"\u00b7"} <Text color="green">[{stats.backend}]</Text></Text>
-      )}
-    </Box>
-  );
+  // Build a single pre-composed line that fits within the terminal
+  const fullLine = left + " ".repeat(gap) + rightParts;
+  const truncated = fullLine.slice(0, w);
+
+  return <Text dimColor>{truncated}</Text>;
 }
 
 // ── Main App ─────────────────────────────────────────────────────
@@ -710,36 +697,52 @@ export function App({
       (async () => {
         try {
           const { SKALE_BITE_SANDBOX } = await import("../../integrations/agentic-commerce/config.js");
+          const { readFileSync } = await import("fs");
+          const { join } = await import("path");
           const explorerUrl = SKALE_BITE_SANDBOX.explorerUrl;
-          const walletAddr = process.env.AGENT_WALLET_ADDRESS || "Not configured -- set AGENT_PRIVATE_KEY";
 
-          // Try to read commerce ledger for spend data
-          let dailySpent = 0;
+          // Read wallet address from wallet.json
+          let walletAddr = "Not configured";
+          try {
+            const walletData = JSON.parse(readFileSync(join(runtimeDir, "wallet", "wallet.json"), "utf-8"));
+            walletAddr = walletData.info?.address || walletAddr;
+          } catch {}
+
+          // Read commerce policy for daily limit
           let dailyLimit = 10.0;
+          try {
+            const policy = JSON.parse(readFileSync(join(runtimeDir, "wallet", "commerce-policy.json"), "utf-8"));
+            dailyLimit = policy.dailyLimit ?? dailyLimit;
+          } catch {}
+
+          // Get live spend data from the tool executor (in-memory SpendTracker)
+          let dailySpent = 0;
           let recentPayments: import("./types.js").X402DashboardData["recentPayments"] = [];
 
           try {
-            const { readFileSync } = await import("fs");
-            const { join } = await import("path");
-            const ledgerPath = join(runtimeDir, "wallet", "commerce-ledger.json");
-            const ledger = JSON.parse(readFileSync(ledgerPath, "utf-8"));
-            if (ledger.payments && Array.isArray(ledger.payments)) {
-              for (const p of ledger.payments.slice(-10)) {
-                dailySpent += p.amount || 0;
+            const executor = agent.getToolExecutor();
+            const auditResult = await executor.execute({ name: "x402_audit_trail", args: { format: "json" } });
+            if (auditResult.success && auditResult.output) {
+              const report = JSON.parse(auditResult.output);
+              dailySpent = report.totalSpent ?? 0;
+              dailyLimit = report.dailyLimit ?? dailyLimit;
+              const records = report.records || [];
+              for (const r of records.slice(-10)) {
                 recentPayments.push({
-                  service: p.service || p.url || "unknown",
-                  amount: p.amount || 0,
-                  txHash: p.txHash || "",
-                  status: p.status || "settled",
-                  timestamp: p.timestamp || "",
+                  service: r.service || r.url || "unknown",
+                  amount: r.amount || 0,
+                  txHash: r.txHash || "",
+                  status: r.status || "settled",
+                  timestamp: r.timestamp || "",
                 });
               }
+              if (report.agentAddress) walletAddr = report.agentAddress;
             }
           } catch {
-            // No ledger file yet -- show empty
+            // Tool executor not available or no integration loaded
           }
 
-          // Try to read wallet balance
+          // Try to read wallet balance on-chain
           let usdcBalance = "0.000000";
           try {
             const { createPublicClient, http } = await import("viem");
@@ -773,7 +776,7 @@ export function App({
           addEntry({
             type: "x402-dashboard" as const,
             data: {
-              walletAddress: process.env.AGENT_WALLET_ADDRESS || "Not configured",
+              walletAddress: "Not configured",
               explorerUrl: "https://base-sepolia-testnet-explorer.skalenodes.com:10032",
               usdcBalance: "0.000000",
               dailySpent: 0,
@@ -919,33 +922,45 @@ Here are the tracks to complete:\n\n`;
 
             if (trackList.includes("1") || trackList.includes("all")) {
               demoPrompt += `━━━ TRACK 1: Overall Best Agentic App ━━━
-GOAL: Demonstrate autonomous multi-step reasoning by researching a topic using paid APIs and compiling findings.
-SUCCESS CRITERIA: Make at least 3 paid API calls using x402_pay_and_fetch to the local services, chain their outputs together, and show cost-awareness throughout.
-AUTONOMY: You choose the topic, which services to call, and how to combine results.
+GOAL: Demonstrate autonomous multi-step reasoning by fetching data from ALL THREE paid APIs and compiling findings.
+SUCCESS CRITERIA (you MUST do ALL of these IN ORDER):
+  Step A: Call x402_pay_and_fetch with url: "weather" (or the full weather URL) and reason: "Fetching weather data for demo"
+  Step B: Call x402_pay_and_fetch with url: "sentiment" (method: POST, body with text from Step A's weather data) and reason: "Analyzing sentiment of weather report"
+  Step C: Call x402_pay_and_fetch with url: "report" (method: POST, body with data from Steps A and B) and reason: "Compiling final report"
+CRITICAL: You MUST call ALL THREE services (weather, sentiment, report). Do NOT skip any. These are 3 separate x402_pay_and_fetch calls.
 WHEN DONE: Say exactly "TRACK 1 COMPLETE" on its own line (plain text).\n\n`;
             }
 
             if (trackList.includes("2")) {
               demoPrompt += `━━━ TRACK 2: Agentic Tool Usage on x402 ━━━
 GOAL: Demonstrate intelligent, cost-aware usage of x402-paywalled services.
-SUCCESS CRITERIA: Check budget with x402_check_budget, make strategic spending decisions, explain your cost/benefit reasoning, and show the full audit trail with x402_audit_trail.
-AUTONOMY: You decide which services are worth paying for and why.
+SUCCESS CRITERIA (you MUST do ALL of these):
+  Step A: Call x402_check_budget to show current budget status
+  Step B: Explain your cost/benefit reasoning (how much you've spent, what's left, was it worth it)
+  Step C: Call x402_audit_trail to show the full payment history
 WHEN DONE: Say exactly "TRACK 2 COMPLETE" on its own line (plain text).\n\n`;
             }
 
             if (trackList.includes("3")) {
               demoPrompt += `━━━ TRACK 3: Best Integration of AP2 ━━━
 GOAL: Demonstrate the AP2 structured purchase flow (Intent -> Cart -> Payment -> Receipt).
-SUCCESS CRITERIA: Execute ap2_purchase using the LOCAL service URLs (e.g. service_url: "${urls.weather}?city=Tokyo"). Show at least 1 successful purchase, explain the mandate flow at each step.
-AUTONOMY: You choose which services to purchase and what descriptions to use.
+SUCCESS CRITERIA (you MUST do ALL of these):
+  Step A: Call ap2_purchase with service_url: "${urls.weather}?city=Tokyo", description: "Weather data purchase via AP2 protocol", amount: "0.001"
+  Step B: Show and explain each mandate stage (Intent -> Cart -> Payment -> Receipt)
+  Step C: Call ap2_get_receipts to show the receipt chain
+CRITICAL: You MUST call ap2_purchase. This is a DIFFERENT tool from x402_pay_and_fetch. Do NOT skip this track.
 WHEN DONE: Say exactly "TRACK 3 COMPLETE" on its own line (plain text).\n\n`;
             }
 
             if (trackList.includes("4")) {
               demoPrompt += `━━━ TRACK 4: Best Trading/DeFi Agent ━━━
-GOAL: Demonstrate autonomous DeFi trading with risk controls.
-SUCCESS CRITERIA: Research market conditions with defi_research, attempt a safe trade with defi_swap, attempt a trade that exceeds risk limits (to show the risk engine blocks it), show trade log with defi_trade_log.
-AUTONOMY: You choose tokens, amounts, and trading strategy based on your research.
+GOAL: Demonstrate autonomous DeFi trading with risk controls -- BOTH an approved swap AND a denied swap.
+YOU MUST MAKE EXACTLY 4 TOOL CALLS FOR THIS TRACK:
+  1. defi_research (token: "ETH") -- get market data
+  2. defi_swap (from_token: "USDC", to_token: "ETH", amount: "0.01", reasoning: "Small safe swap within risk limits") -- this WILL BE APPROVED
+  3. defi_swap (from_token: "USDC", to_token: "ETH", amount: "5000", reasoning: "Large swap to test risk engine denial") -- this WILL BE DENIED
+  4. defi_trade_log -- show the full trade history with BOTH the approved and denied trades
+ALL 4 CALLS ARE MANDATORY. The demo requires showing both an approved AND a denied swap. If you only show the denial, the track FAILS.
 WHEN DONE: Say exactly "TRACK 4 COMPLETE" on its own line (plain text).\n\n`;
             }
 
@@ -1017,24 +1032,153 @@ Use CLI-style formatting with box-drawing characters throughout.`;
             let allAccumulated = ""; // Cross-turn accumulation for track detection
             const chatStart = Date.now();
 
+            // Tool-based track detection: track which tools completed successfully
+            const toolCalls = new Map<string, number>(); // tool name -> success count
+            const markTrackIfNeeded = (track: string) => {
+              if (completedTracks.has(track) || !trackList.includes(track)) return;
+              completedTracks.add(track);
+              tracksCompleted = completedTracks.size;
+              addEntry({
+                type: "marathon-progress" as const,
+                event: "milestone_completed",
+                milestone: `Track ${track} complete`,
+                progress: tracksCompleted,
+                total: trackCount,
+                thinkingLevel: config?.thinking?.defaultLevel || "high",
+              });
+            };
+            // Count tool calls with normalized name matching
+            const toolCount = (name: string) => {
+              let total = 0;
+              for (const [k, v] of toolCalls) {
+                if (k === name || k.toLowerCase().replace(/[\s-]+/g, "_") === name) total += v;
+              }
+              return total;
+            };
+
+            // Validate whether a track has real tool evidence (not just agent text claims)
+            const hasTrackEvidence = (track: string): boolean => {
+              switch (track) {
+                case "1": return toolCount("x402_pay_and_fetch") >= 3;
+                case "2": return toolCount("x402_check_budget") >= 1 && toolCount("x402_audit_trail") >= 1;
+                case "3": return toolCount("ap2_purchase") >= 1;
+                case "4": {
+                  // Need at least 2 defi_swap calls (one approved, one denied) + trade log
+                  // AND content evidence of both outcomes (since denied swaps also return success=true)
+                  const c = allAccumulated.toLowerCase();
+                  const hasApproved = c.includes("swap executed successfully");
+                  const hasDenied = c.includes("swap denied");
+                  return toolCount("defi_swap") >= 2 && toolCount("defi_trade_log") >= 1 && hasApproved && hasDenied;
+                }
+                case "5": return toolCount("bite_encrypt_payment") >= 1 && toolCount("bite_check_and_execute") >= 1;
+                default: return false;
+              }
+            };
+
+            const checkToolBasedTracks = () => {
+              if (hasTrackEvidence("1")) markTrackIfNeeded("1");
+              if (hasTrackEvidence("2")) markTrackIfNeeded("2");
+              if (hasTrackEvidence("3")) markTrackIfNeeded("3");
+              if (hasTrackEvidence("4")) markTrackIfNeeded("4");
+              if (hasTrackEvidence("5")) markTrackIfNeeded("5");
+            };
+
+            // Content-based track detection: only fires if tool evidence also exists
+            // This prevents the agent's text claims from triggering completion without actual tools
+            const checkContentBasedTracks = () => {
+              // Content-based detection is now secondary to tool-based detection
+              // Only check content if tool evidence partially supports it
+              const c = allAccumulated.toLowerCase();
+
+              // Track 1: Require 3 x402_pay_and_fetch calls (strict)
+              // Content alone is NOT enough - agent can hallucinate service responses
+              if (!completedTracks.has("1") && toolCount("x402_pay_and_fetch") >= 3) {
+                markTrackIfNeeded("1");
+              }
+              // Track 2: tool-based only (budget + audit)
+              if (!completedTracks.has("2") && hasTrackEvidence("2")) {
+                markTrackIfNeeded("2");
+              }
+              // Track 3: AP2 mandate chain evidence + tool call
+              if (!completedTracks.has("3") && toolCount("ap2_purchase") >= 1) {
+                markTrackIfNeeded("3");
+              }
+              // Track 4: Need BOTH approved + denied swap evidence with exact output strings
+              if (!completedTracks.has("4")) {
+                const hasApproved = c.includes("swap executed successfully");
+                const hasDenied = c.includes("swap denied");
+                if (hasApproved && hasDenied && toolCount("defi_swap") >= 2 && toolCount("defi_trade_log") >= 1) markTrackIfNeeded("4");
+              }
+              // Track 5: BITE tool-based only
+              if (!completedTracks.has("5") && hasTrackEvidence("5")) {
+                markTrackIfNeeded("5");
+              }
+            };
+
             while (demoTurn < MAX_DEMO_TURNS && !demoComplete && !abort.signal.aborted) {
               demoTurn++;
 
               // First turn uses the full demo prompt; subsequent turns ask to continue
+              const remainingTracks = trackList.filter((t: string) => !completedTracks.has(t));
+
+              // Build a status report of what tools have ACTUALLY been called
+              const toolStatus: string[] = [];
+              for (const t of remainingTracks) {
+                const missing: string[] = [];
+                switch (t) {
+                  case "1": {
+                    const payCount = toolCount("x402_pay_and_fetch");
+                    if (payCount < 3) missing.push(`x402_pay_and_fetch (called ${payCount}/3 -- you MUST call ${3 - payCount} more: ${payCount < 1 ? "weather, " : ""}${payCount < 2 ? "sentiment, " : ""}report)`);
+                    break;
+                  }
+                  case "2": {
+                    if (toolCount("x402_check_budget") < 1) missing.push("x402_check_budget");
+                    if (toolCount("x402_audit_trail") < 1) missing.push("x402_audit_trail");
+                    break;
+                  }
+                  case "3": {
+                    if (toolCount("ap2_purchase") < 1) missing.push(`ap2_purchase (use service_url: "${urls.weather}?city=Tokyo")`);
+                    break;
+                  }
+                  case "4": {
+                    const swapCount = toolCount("defi_swap");
+                    const ct = allAccumulated.toLowerCase();
+                    const hasApprovedSwap = ct.includes("swap executed successfully");
+                    const hasDeniedSwap = ct.includes("swap denied");
+                    if (swapCount < 1) {
+                      missing.push("defi_swap (from_token: USDC, to_token: ETH, amount: 0.01, reasoning: 'Small safe swap') -- APPROVED swap");
+                    } else if (!hasApprovedSwap) {
+                      missing.push("defi_swap (amount: 0.01 USDC) -- you only have denied swaps, you MUST also execute a SMALL approved swap");
+                    }
+                    if (!hasDeniedSwap) {
+                      missing.push("defi_swap (amount: 5000 USDC) -- DENIED swap to show risk engine");
+                    }
+                    if (toolCount("defi_trade_log") < 1) missing.push("defi_trade_log");
+                    break;
+                  }
+                  case "5": {
+                    if (toolCount("bite_encrypt_payment") < 1) missing.push(`bite_encrypt_payment (to: "${sellerAddress}")`);
+                    if (toolCount("bite_check_and_execute") < 1) missing.push("bite_check_and_execute");
+                    break;
+                  }
+                }
+                if (missing.length > 0) {
+                  toolStatus.push(`Track ${t} MISSING tool calls: ${missing.join(", ")}`);
+                }
+              }
+
               const turnPrompt = demoTurn === 1
                 ? demoPrompt
-                : `Continue the demonstration. Complete all remaining tracks.
-STRICT RULES (do NOT violate):
+                : `Continue the demonstration. You have ${remainingTracks.length} tracks remaining: ${remainingTracks.map((t: string) => `Track ${t}`).join(", ")}.
+
+WARNING: A track is ONLY considered complete when you have actually called the required tools. Saying "TRACK N COMPLETE" without making the tool calls does NOT count. The system tracks your ACTUAL tool calls.
+
+${toolStatus.length > 0 ? `ACTUAL TOOL CALL STATUS (from system tracking):\n${toolStatus.join("\n")}\n` : ""}
+IMPORTANT: You MUST make every listed tool call. Do NOT claim a track is complete without making the calls. Do NOT skip tool calls between turns.
+STRICT RULES:
 - ONLY use these URLs: ${urls.weather}, ${urls.sentiment}, ${urls.report}
-- For AP2 purchases, use service_url with the EXACT URLs above.
-- For BITE (Track 5), you MUST follow this EXACT sequence:
-  1. Call bite_encrypt_payment with to, data, condition_type, condition_description
-  2. Read the payment_id from its response (it starts with "bite_")
-  3. ONLY THEN call bite_check_and_execute with that exact payment_id
-  4. Then call bite_lifecycle_report with that same payment_id
-  NEVER call bite_check_and_execute without first calling bite_encrypt_payment in the SAME session. NEVER invent or guess a payment_id.
 - NEVER fabricate tx hashes, amounts, or addresses. Only use values returned by tools.
-- Say "TRACK N COMPLETE" (plain text, own line) after finishing each track.`;
+- Call ALL required tools BEFORE saying "TRACK N COMPLETE".`;
 
               // Show continuation indicator for turns > 1
               if (demoTurn > 1) {
@@ -1106,6 +1250,12 @@ STRICT RULES (do NOT violate):
                     tn = name;
                     ts = Date.now();
                     addEntry({ type: "tool-call", data: { name, args } });
+                    // Pre-register the tool call (even before result comes back)
+                    // This ensures the name is tracked regardless of result format
+                    const normalizedCallName = name.toLowerCase().replace(/[\s-]+/g, "_");
+                    if (normalizedCallName) {
+                      toolCalls.set(normalizedCallName, (toolCalls.get(normalizedCallName) ?? 0));
+                    }
                     break;
                   }
 
@@ -1123,6 +1273,16 @@ STRICT RULES (do NOT violate):
                     });
                     // Also accumulate tool results for track detection
                     allAccumulated += "\n" + chunk.content;
+                    // Track successful tool calls for progress detection
+                    if (!isError && tn) {
+                      const normalizedTn = tn.toLowerCase().replace(/[\s-]+/g, "_");
+                      toolCalls.set(normalizedTn, (toolCalls.get(normalizedTn) ?? 0) + 1);
+                      checkToolBasedTracks();
+                      checkContentBasedTracks();
+                    } else if (tn) {
+                      // Even on error, still do content-based check (some "errors" contain useful data)
+                      checkContentBasedTracks();
+                    }
                     // Detect sandbox (dev server) launches
                     if (tn === "run_dev_server" || tn === "bash") {
                       const urlMatch = chunk.content.match(/https?:\/\/localhost:\d+/);
@@ -1225,6 +1385,11 @@ STRICT RULES (do NOT violate):
                 // Accumulate across all turns for track detection
                 allAccumulated += "\n" + turnAccumulated;
 
+                // Run content-based track detection after each turn
+                checkContentBasedTracks();
+                // Also run tool-based detection (in case tools completed this turn)
+                checkToolBasedTracks();
+
                 // Detect track completions (flexible matching, strip ALL formatting)
                 const cleaned = allAccumulated
                   .replace(/\*\*/g, "").replace(/\*/g, "").replace(/_/g, "").replace(/`/g, "")
@@ -1234,47 +1399,41 @@ STRICT RULES (do NOT violate):
                 for (const t of trackList) {
                   if (completedTracks.has(t)) continue;
                   // Match "TRACK N COMPLETE/PASS/DONE/SUCCEEDED" in any format
-                  if (cleaned.includes(`track ${t} complete`) ||
+                  const agentClaimsComplete = cleaned.includes(`track ${t} complete`) ||
                       cleaned.includes(`track ${t}: complete`) ||
                       cleaned.includes(`track ${t} pass`) ||
                       cleaned.includes(`track ${t}: pass`) ||
-                      cleaned.match(new RegExp(`track\\s*${t}\\s*(?::|\\s)\\s*(?:is\\s+)?(?:complete|pass|done|succeeded)`)) ||
-                      cleaned.match(new RegExp(`track\\s*${t}\\s+done`))) {
-                    completedTracks.add(t);
-                    tracksCompleted = completedTracks.size;
-                    addEntry({
-                      type: "marathon-progress" as const,
-                      event: "milestone_completed",
-                      milestone: `Track ${t} complete`,
-                      progress: tracksCompleted,
-                      total: trackCount,
-                      thinkingLevel: config?.thinking?.defaultLevel || "high",
-                    });
+                      !!cleaned.match(new RegExp(`track\\s*${t}\\s*(?::|\\s)\\s*(?:is\\s+)?(?:complete|pass|done|succeeded)`)) ||
+                      !!cleaned.match(new RegExp(`track\\s*${t}\\s+done`));
+
+                  if (agentClaimsComplete) {
+                    // Validate: only mark complete if we have tool evidence
+                    if (hasTrackEvidence(t)) {
+                      markTrackIfNeeded(t);
+                    }
+                    // else: agent claims complete but tools don't confirm — skip
+                    // The continuation prompt will tell the agent to actually complete it
                   }
                 }
 
                 // Detect overall completion
-                if (cleaned.includes("all tracks complete") ||
+                if (completedTracks.size >= trackCount) {
+                  demoComplete = true;
+                } else if (cleaned.includes("all tracks complete") ||
                     cleaned.includes("all 5 tracks") ||
                     cleaned.includes("demonstration complete") ||
                     cleaned.includes("5/5 tracks") ||
-                    cleaned.match(/all\s+tracks?\s+(?:passed|done|succeeded|complete)/) ||
-                    completedTracks.size >= trackCount) {
-                  // Mark ALL remaining tracks as complete
+                    cleaned.match(/all\s+tracks?\s+(?:passed|done|succeeded|complete)/)) {
+                  // Agent claims all tracks are done - run evidence checks
+                  checkContentBasedTracks();
+                  checkToolBasedTracks();
+                  // Only mark remaining tracks if they have evidence
                   for (const t of trackList) {
-                    if (!completedTracks.has(t)) {
-                      completedTracks.add(t);
-                      tracksCompleted = completedTracks.size;
-                      addEntry({
-                        type: "marathon-progress" as const,
-                        event: "milestone_completed",
-                        milestone: `Track ${t} complete`,
-                        progress: tracksCompleted,
-                        total: trackCount,
-                        thinkingLevel: config?.thinking?.defaultLevel || "high",
-                      });
+                    if (!completedTracks.has(t) && hasTrackEvidence(t)) {
+                      markTrackIfNeeded(t);
                     }
                   }
+                  // End demo: all evidence-backed tracks are marked, rest stay incomplete
                   demoComplete = true;
                 }
               } else if (!turnAccumulated && demoTurn > 1) {
@@ -1314,9 +1473,10 @@ STRICT RULES (do NOT violate):
                   const svc = (r.service || "unknown").slice(0, 22).padEnd(23);
                   const amt = `$${(r.amount || 0).toFixed(6)}`.padEnd(14);
                   const st = (r.status || "unknown").padEnd(11);
-                  const hash = r.txHash && r.txHash.startsWith("0x") && r.txHash.length > 10
+                  const hasRealHash = r.txHash && r.txHash.startsWith("0x") && r.txHash.length >= 66;
+                  const hash = hasRealHash
                     ? `${r.txHash.slice(0, 14)}...`
-                    : (r.txHash || "pending");
+                    : "facilitator-settled";
                   return `  \u2502 ${num}${svc}${amt}${st}${hash}`;
                 });
 
@@ -1331,10 +1491,45 @@ STRICT RULES (do NOT violate):
                   return `  \u2502 ${t.padEnd(8)}${name}${status}`;
                 });
 
-                // Full tx hashes for verification
+                // Collect BITE tx hashes (tracked separately from x402)
+                let biteHashes: string[] = [];
+                try {
+                  const biteResult = await executor.execute({ name: "bite_lifecycle_report", args: { payment_id: "all" } });
+                  if (biteResult.success && biteResult.output) {
+                    const hashMatches = biteResult.output.matchAll(/Tx:\s+(0x[a-fA-F0-9]{64})/g);
+                    for (const m of hashMatches) biteHashes.push(m[1]);
+                  }
+                } catch {}
+                // Fallback: extract BITE hashes from accumulated agent output
+                if (biteHashes.length === 0) {
+                  // Match both console format "[BITE] Submitted: 0x..." and report format "│ Tx:  0x..."
+                  const patterns = [
+                    /\[BITE\]\s+Submitted:\s+(0x[a-fA-F0-9]{64})/g,
+                    /Tx:\s+(0x[a-fA-F0-9]{64})/g,
+                  ];
+                  for (const pat of patterns) {
+                    const matches = allAccumulated.matchAll(pat);
+                    for (const m of matches) {
+                      // Exclude x402/DeFi tx hashes (already in records)
+                      const hash = m[1];
+                      const isInRecords = records.some((r: any) => r.txHash === hash);
+                      if (!isInRecords) biteHashes.push(hash);
+                    }
+                  }
+                }
+                // Deduplicate
+                biteHashes = [...new Set(biteHashes)];
+
+                // Full tx hashes for verification (x402 + BITE merged)
+                let linkIdx = 0;
                 const txLinks = records
-                  .filter((r: any) => r.txHash && r.txHash.startsWith("0x") && r.txHash.length > 10)
-                  .map((r: any, i: number) => `  \u2502 Tx #${i + 1}: ${explorerBase}/tx/${r.txHash}`);
+                  .filter((r: any) => r.txHash && r.txHash.startsWith("0x") && r.txHash.length >= 66)
+                  .map((r: any) => `  \u2502 Tx #${++linkIdx}: ${explorerBase}/tx/${r.txHash}`);
+                for (const h of biteHashes) {
+                  if (!txLinks.some((l: string) => l.includes(h))) {
+                    txLinks.push(`  \u2502 BITE #${++linkIdx}: ${explorerBase}/tx/${h}`);
+                  }
+                }
 
                 const verificationText = [
                   "",
@@ -1737,10 +1932,35 @@ STRICT RULES (do NOT violate):
       )
     : 20;
 
-  // ── Gradient separator (full terminal width, like Copilot CLI) ──
+  // ── Resize: use Ink's own clear() to reset output tracking ──
+  const [resizeTick, setResizeTick] = useState(0);
+  useEffect(() => {
+    let debounce: ReturnType<typeof setTimeout>;
+    const onResize = () => {
+      const c = process.stdout.columns;
+      if (!c || c < 20) return; // ignore minimize
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        // Ink's clear() properly resets internal line-count tracking,
+        // preventing ghost renders that raw ANSI escapes can't fix.
+        if (_inkClear) {
+          _inkClear();
+        }
+        // Trigger re-render so dynamic area repaints at new width
+        setResizeTick((n) => n + 1);
+      }, 100);
+    };
+    process.stdout.on("resize", onResize);
+    return () => { clearTimeout(debounce); process.stdout.off("resize", onResize); };
+  }, []);
+
+  // ── Terminal width — always read live (resizeTick forces fresh read) ──
+  const cols = (resizeTick >= 0 && process.stdout.columns) || 80;
+
+  // ── Gradient separator (exact terminal width, read live each render) ──
   const theme = getTheme();
-  const palSepWidth = process.stdout.columns || 80;
-  const palSepLine = gradient(theme.gradientAccent)("\u2500".repeat(palSepWidth));
+  const sepCols = process.stdout.columns || 80;
+  const palSepLine = gradient(theme.gradientAccent)("\u2500".repeat(sepCols));
 
   // ── Render ──
 
@@ -1818,7 +2038,7 @@ STRICT RULES (do NOT violate):
 
         {/* Hints bar with stats (when palette is NOT open) */}
         {!showPalette && (
-          <HintsBar cols={process.stdout.columns || 80} stats={lastStats} />
+          <HintsBar stats={lastStats} />
         )}
 
         {/* Command palette rows (when palette IS open) */}
