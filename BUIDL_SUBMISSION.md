@@ -43,63 +43,63 @@ Full audit report PDF: [`x402_hackathon_report.pdf`](docs/x402_hackathon_report.
 ### 1. CLI Startup & Banner
 > Wispy v1.4.0-x402 with x402 + AP2 + BITE + DeFi capabilities, SKALE BITE V2 network, and connected Telegram channel.
 
-![CLI Startup](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/01-cli-startup.png)
+![CLI Startup](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/01-cli-startup.png)
 
 ### 2. Track 1: Service Discovery & 3-API Chain
 > Agent discovers x402 services, pays weather ($0.001), sentiment ($0.002), and report ($0.001) APIs autonomously.
 
-![Service Discovery](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/02-service-discovery.png)
+![Service Discovery](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/02-service-discovery.png)
 
-![API Chain](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/03-api-chain.png)
+![API Chain](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/03-api-chain.png)
 
 ### 3. Track 2: Budget Reasoning & Audit Trail
 > Agent checks budget ($0.004 spent of $5.00), explains cost/benefit, and generates full audit trail.
 
-![Budget Reasoning](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/04-budget-reasoning.png)
+![Budget Reasoning](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/04-budget-reasoning.png)
 
 ### 4. Track 3: AP2 Purchase Flow
 > Full AP2 mandate chain: Intent (EIP-191 signed) -> Cart -> Payment -> Receipt.
 
-![AP2 Flow](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/05-ap2-flow.png)
+![AP2 Flow](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/05-ap2-flow.png)
 
 ### 5. Track 4: DeFi Trading with Risk Engine
 > 0.01 USDC swap APPROVED (risk 15/100, real on-chain tx). 5000 USDC swap DENIED (risk 90/100, exceeds $500 limit).
 
-![DeFi Trading](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/06-defi-trading.png)
+![DeFi Trading](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/06-defi-trading.png)
 
 ### 6. Track 5: BITE v2 Encrypted Payment
 > BLS threshold encryption, on-chain submission, condition evaluation, decryption verification.
 
-![BITE Encryption](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/07-bite-encryption.png)
+![BITE Encryption](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/07-bite-encryption.png)
 
 ### 7. Final Verification Summary
 > All 5 tracks PASS with 6 transactions and on-chain proof links.
 
-![Verification Summary](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/08-verification-summary.png)
+![Verification Summary](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/08-verification-summary.png)
 
 ### 8. Agent-Generated Verification Report
 > Wispy autonomously generates a full audit trail summary with all tx hashes and track results.
 
-![Agent Report](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/09-agent-report.png)
+![Agent Report](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/09-agent-report.png)
 
 ### 9. Telegram Integration
 > PDF audit report sent to Telegram with full demo results.
 
-![Telegram](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/11-telegram.png)
+![Telegram](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/11-telegram.png)
 
 ### On-Chain Explorer Proof
 
-![Explorer - Agent Wallet](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/12-explorer-wallet.png)
+![Explorer - Agent Wallet](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/12-explorer-wallet.png)
 
-![Explorer - DeFi Tx](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/13-explorer-defi-tx.png)
+![Explorer - DeFi Tx](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/13-explorer-defi-tx.png)
 
-![Explorer - BITE Tx](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/14-explorer-bite-tx.png)
+![Explorer - BITE Tx](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/14-explorer-bite-tx.png)
 
-![Explorer - SwapRouter](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/15-explorer-swapRouter.png)
+![Explorer - SwapRouter](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/15-explorer-swapRouter.png)
 
 ### PDF Audit Report
 
-![PDF Report](https://raw.githubusercontent.com/hausorlabs/wispy/main/screenshots/16-pdf-report.png)
+![PDF Report](https://raw.githubusercontent.com/hausorlabs/wispy/x402-demo-fixes/screenshots/16-pdf-report.png)
 
 ---
 
