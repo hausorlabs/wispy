@@ -1,4 +1,4 @@
-[![Wispy](https://github.com/hausorlabs/wispy/raw/main/assets/banner.png)](https://youtu.be/U7KddE5Yg1c?si=aj0V0K3UE1LICO5z)
+[![Watch the Demo](https://img.youtube.com/vi/U7KddE5Yg1c/maxresdefault.jpg)](https://youtu.be/U7KddE5Yg1c?si=aj0V0K3UE1LICO5z)
 
 # Wispy -- An Autonomous AI Agent That Discovers, Decides, Pays, and Delivers
 
