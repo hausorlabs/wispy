@@ -138,21 +138,27 @@ export async function runSetupWizard(opts: {
     console.log(WISPY_ASCII);
     console.log(skyBold(`  ${chalk.rgb(49,204,255)("*")} Welcome to Wispy!\n`));
     console.log(dim("  Wispy is your autonomous AI agent powered by Google Gemini."));
-    console.log(dim("  Let's get you set up in a few steps.\n"));
-    await ask(rl, dim("  Press Enter to continue..."));
+    console.log(dim("  This wizard will walk you through setup step by step.\n"));
+    console.log(dim("  You will need:"));
+    console.log(`  ${sky("1.")} A Gemini API key ${dim("(free at aistudio.google.com/apikey)")}`);
+    console.log(`  ${sky("2.")} ${dim("Optional:")} A Telegram bot token ${dim("(from @BotFather on Telegram)")}`);
+    console.log(`  ${sky("3.")} ${dim("Optional:")} An Ethereum wallet key ${dim("(for x402 payments)")}`);
+    console.log("");
+    console.log(dim("  Everything else has smart defaults. You can change settings later.\n"));
+    await ask(rl, dim("  Press Enter to start..."));
 
     // ── Step 2: API Key ──────────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.yellow("▸")} AI Configuration\n`));
-    console.log(dim("  Choose how to connect to Google's AI:"));
+    console.log(skyBold(`  ${chalk.yellow("▸")} Step 1 of 4: AI Configuration\n`));
+    console.log(dim("  Wispy needs a Google Gemini API key to think and reason.\n"));
+    console.log(`  ${sky("1)")} ${bold("Gemini API Key")} ${dim("(Recommended)")}`);
+    console.log(dim(`     Free to start. Go to this link and click "Create API key":`));
+    console.log(`     ${sky("https://aistudio.google.com/apikey")}`);
     console.log("");
-    console.log(`  ${sky("1)")} ${bold("Gemini API Key")} ${dim("(Free tier: 20 req/day)")}`);
-    console.log(dim(`     Get one free: ${sky("https://aistudio.google.com/apikey")}`));
-    console.log("");
-    console.log(`  ${sky("2)")} ${bold("Vertex AI")} ${dim("(Higher quotas: 300+ req/min)")}`);
-    console.log(dim(`     Requires Google Cloud project with billing enabled`));
-    console.log(dim(`     Setup: ${sky("https://cloud.google.com/vertex-ai/generative-ai/docs/start/quickstarts/quickstart-multimodal")}`));
+    console.log(`  ${sky("2)")} ${bold("Vertex AI")} ${dim("(For production / higher quotas)")}`);
+    console.log(dim(`     Needs a Google Cloud project with billing.`));
+    console.log(dim(`     Only choose this if you already have a GCP account.`));
     console.log("");
 
     const existingKey = process.env.GEMINI_API_KEY;
@@ -193,10 +199,13 @@ export async function runSetupWizard(opts: {
         }
       } else {
         console.log("");
-        console.log(dim("  Get your free API key:"));
-        console.log(`  ${sky("→ https://aistudio.google.com/apikey")}`);
+        console.log(dim("  How to get your key:"));
+        console.log(`  ${sky("1.")} Open ${sky("https://aistudio.google.com/apikey")}`);
+        console.log(`  ${sky("2.")} Sign in with your Google account`);
+        console.log(`  ${sky("3.")} Click ${bold("\"Create API key\"")}`);
+        console.log(`  ${sky("4.")} Copy the key (starts with ${bold("AIza")}...)`);
         console.log("");
-        apiKey = await ask(rl, sky("  Enter your Gemini API key: "));
+        apiKey = await ask(rl, sky("  Paste your Gemini API key here: "));
         apiKey = apiKey.trim();
 
         if (apiKey && !apiKey.startsWith("AIza")) {
@@ -215,13 +224,16 @@ export async function runSetupWizard(opts: {
     // ── Step 2b: Telegram Bot Token (optional) ──────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.blue("▸")} Telegram Bot Setup\n`));
-    console.log(dim("  Connect a Telegram bot to chat with Wispy from your phone!"));
-    console.log(dim("  Create code, monitor projects, and control your agent remotely.\n"));
-    console.log(dim("  How to create a Telegram bot:"));
-    console.log(`  ${sky("1)")} Message ${bold("@BotFather")} on Telegram`);
-    console.log(`  ${sky("2)")} Send ${sky("/newbot")} and follow the prompts`);
-    console.log(`  ${sky("3)")} Copy the bot token (looks like: 123456:ABC-DEF1234...)`);
+    console.log(skyBold(`  ${chalk.blue("▸")} Step 2 of 4: Telegram Bot (Optional)\n`));
+    console.log(dim("  Connect Telegram to chat with Wispy from your phone."));
+    console.log(dim("  Skip this if you only want to use the terminal.\n"));
+    console.log(dim("  How to create a Telegram bot (takes 1 minute):"));
+    console.log(`  ${sky("1.")} Open Telegram and search for ${bold("@BotFather")}`);
+    console.log(`  ${sky("2.")} Send the message: ${sky("/newbot")}`);
+    console.log(`  ${sky("3.")} Choose a name for your bot (e.g. "My Wispy")`);
+    console.log(`  ${sky("4.")} Choose a username (e.g. "my_wispy_bot")`);
+    console.log(`  ${sky("5.")} BotFather will reply with a ${bold("token")} like: ${dim("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")}`);
+    console.log(`  ${sky("6.")} Copy that token`);
     console.log("");
 
     const existingTelegramToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -232,7 +244,7 @@ export async function runSetupWizard(opts: {
       console.log(green(`  ✓ Found existing token: ${masked}\n`));
       telegramToken = existingTelegramToken;
     } else {
-      telegramToken = await ask(rl, sky("  Enter Telegram bot token (or press Enter to skip): "));
+      telegramToken = await ask(rl, sky("  Paste your bot token here (or press Enter to skip): "));
       telegramToken = telegramToken.trim();
 
       if (!telegramToken) {
@@ -243,15 +255,14 @@ export async function runSetupWizard(opts: {
     // ── Step 2c: Autonomous Mode ──────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.yellow("▸")} Autonomous Mode\n`));
-    console.log(dim("  Wispy can run in two modes:\n"));
-    console.log(`  ${sky("1)")} ${bold("Standard Mode")} ${dim("(Safe)")}`);
-    console.log(dim("     Requires approval for file writes, code execution, etc."));
-    console.log(dim("     Best for: Production, shared environments, safety-first\n"));
-    console.log(`  ${sky("2)")} ${bold("Autonomous Mode")} ${dim("(Recommended for Development)")}`);
-    console.log(dim("     Auto-approves file operations, bash, browser automation"));
-    console.log(dim("     Best for: Local development, coding assistance, hackathons"));
-    console.log(dim("     ⚡ Like OpenClaw - create code and projects via Telegram\n"));
+    console.log(skyBold(`  ${chalk.yellow("▸")} Step 3 of 4: How Should Wispy Work?\n`));
+    console.log(dim("  Choose how much freedom Wispy gets:\n"));
+    console.log(`  ${sky("1)")} ${bold("Standard Mode")} ${dim("(Ask before acting)")}`);
+    console.log(dim("     Wispy will ask your permission before writing files or running code."));
+    console.log(dim("     Best for: Beginners, shared computers, production servers.\n"));
+    console.log(`  ${sky("2)")} ${bold("Autonomous Mode")} ${dim("(Recommended)")}`);
+    console.log(dim("     Wispy acts on its own -- writes files, runs code, creates projects."));
+    console.log(dim("     Best for: Personal computer, development, getting things done fast.\n"));
 
     const modeChoice = await ask(rl, sky("  Select [1/2] (default: 2 for Autonomous): "));
     const autonomousMode = modeChoice.trim() !== "1";
@@ -259,7 +270,8 @@ export async function runSetupWizard(opts: {
     // ── Step 3: Theme ────────────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.magenta("▸")} Choose your theme\n`));
+    console.log(skyBold(`  ${chalk.magenta("▸")} Pick a Color Theme\n`));
+    console.log(dim("  This changes how Wispy looks in your terminal.\n"));
 
     for (let i = 0; i < THEMES.length; i++) {
       const num = sky(`${i + 1})`);
@@ -276,8 +288,9 @@ export async function runSetupWizard(opts: {
     // ── Step 4: Agents ───────────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.cyan("▸")} Select your agents\n`));
-    console.log(dim("  Choose which AI agents you want active:\n"));
+    console.log(skyBold(`  ${chalk.cyan("▸")} Choose Agent Roles\n`));
+    console.log(dim("  These are Wispy's specializations. Coder + Researcher are pre-selected."));
+    console.log(dim("  Just press Enter to keep the defaults, or pick more.\n"));
 
     for (let i = 0; i < AGENTS.length; i++) {
       const mark = AGENTS[i].defaultOn ? green("[x]") : dim("[ ]");
@@ -300,8 +313,9 @@ export async function runSetupWizard(opts: {
     // ── Step 5: Integrations ─────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.blue("▸")} Connect integrations (optional)\n`));
-    console.log(dim("  You can enable these later with 'wispy integrations enable <id>'\n"));
+    console.log(skyBold(`  ${chalk.blue("▸")} Connect Apps (Optional)\n`));
+    console.log(dim("  Connect Wispy to services you use. Skip for now if unsure."));
+    console.log(dim("  You can always enable these later: wispy integrations enable <name>\n"));
 
     // Display in two columns
     const half = Math.ceil(INTEGRATIONS.length / 2);
@@ -328,9 +342,9 @@ export async function runSetupWizard(opts: {
     // ── Step 6: MCP Servers ─────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.green("▸")} MCP Servers (Model Context Protocol)\n`));
-    console.log(dim("  MCP servers extend Wispy's capabilities with external tools."));
-    console.log(dim("  These let Wispy interact with your file system, web, and more.\n"));
+    console.log(skyBold(`  ${chalk.green("▸")} Extra Tools (MCP Servers)\n`));
+    console.log(dim("  These give Wispy extra abilities like reading files or browsing the web."));
+    console.log(dim("  The defaults (File System + Web Fetch) are recommended. Just press Enter.\n"));
 
     const MCP_SERVERS = [
       {
@@ -406,15 +420,15 @@ export async function runSetupWizard(opts: {
     // ── Step 7: x402 Agentic Commerce ──────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.hex('#00FFA3')("▸")} x402 Agentic Commerce\n`));
-    console.log(dim("  Enable your AI agent to make autonomous micro-payments"));
-    console.log(dim("  using the x402 HTTP payment protocol on SKALE network.\n"));
-    console.log(`  ${sky("Features:")}`);
-    console.log(`  ${chalk.hex('#00FFA3')("•")} Autonomous API payments (HTTP 402 handling)`);
-    console.log(`  ${chalk.hex('#00FFA3')("•")} Budget controls & spend tracking`);
-    console.log(`  ${chalk.hex('#00FFA3')("•")} On-chain settlement on SKALE (gasless)`);
-    console.log(`  ${chalk.hex('#00FFA3')("•")} AP2 mandate flow & DeFi trading`);
+    console.log(skyBold(`  ${chalk.hex('#00FFA3')("▸")} Step 4 of 4: Blockchain Wallet (Optional)\n`));
+    console.log(dim("  Give Wispy a wallet so it can pay for services automatically."));
+    console.log(dim("  Uses USDC on SKALE (gasless -- no transaction fees).\n"));
+    console.log(dim("  What this enables:"));
+    console.log(`  ${chalk.hex('#00FFA3')("•")} Agent pays for APIs on its own (micro-payments)`);
+    console.log(`  ${chalk.hex('#00FFA3')("•")} DeFi trading with built-in risk controls`);
+    console.log(`  ${chalk.hex('#00FFA3')("•")} Encrypted conditional payments (BITE v2)`);
     console.log("");
+    console.log(dim("  Skip this if you just want to use Wispy for chat and coding.\n"));
 
     const existingAgentKey = process.env.AGENT_PRIVATE_KEY;
     let agentPrivateKey = "";
@@ -430,10 +444,8 @@ export async function runSetupWizard(opts: {
 
       if (!enableChoice.trim() || enableChoice.trim().toLowerCase().startsWith("y")) {
         console.log("");
-        console.log(dim("  You need an Ethereum private key for the agent wallet."));
-        console.log(dim("  This wallet will hold USDC on SKALE for micro-payments.\n"));
-        console.log(`  ${sky("1)")} ${bold("Generate a new wallet")} ${dim("(Quick start)")}`);
-        console.log(`  ${sky("2)")} ${bold("Enter existing private key")} ${dim("(Use your own)")}`);
+        console.log(`  ${sky("1)")} ${bold("Generate a new wallet")} ${dim("(Recommended -- creates one for you)")}`);
+        console.log(`  ${sky("2)")} ${bold("Use an existing wallet")} ${dim("(Paste your private key)")}`);
         console.log("");
 
         const keyChoice = await ask(rl, sky("  Select [1/2] (default: 1): "));
@@ -490,9 +502,9 @@ export async function runSetupWizard(opts: {
     // ── Step 8: Voice/TTS Setup (Edge TTS) ─────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.hex('#FF6B6B')("▸")} Voice Setup (Natural TTS)\n`));
-    console.log(dim("  Enable natural text-to-speech for voice messages in Telegram."));
-    console.log(dim("  Using Microsoft Edge TTS - free, fast, and sounds very natural.\n"));
+    console.log(skyBold(`  ${chalk.hex('#FF6B6B')("▸")} Voice (Optional)\n`));
+    console.log(dim("  Let Wispy speak responses aloud in Telegram voice messages."));
+    console.log(dim("  Uses Edge TTS -- free, fast, and natural-sounding.\n"));
     console.log(`  ${chalk.hex('#FF6B6B')("Features:")}`);
     console.log(`  ${sky("•")} Multiple natural voices (male/female, various accents)`);
     console.log(`  ${sky("•")} Fast generation (2-3 seconds)`);
@@ -608,8 +620,8 @@ export async function runSetupWizard(opts: {
       agent: { name: "wispy", id: "main" },
       gemini: {
         models: {
-          pro: "gemini-2.5-flash",
-          flash: "gemini-2.5-flash",
+          pro: "gemini-2.5-pro-preview-05-06",
+          flash: "gemini-2.5-flash-preview-05-20",
           image: "gemini-2.0-flash",
           embedding: "text-embedding-004",
         },
@@ -733,18 +745,21 @@ export async function runSetupWizard(opts: {
 
     if (!apiKey && !useVertexAI) {
       console.log(yellowBright("  ⚠ No AI credentials configured!"));
-      console.log(dim("  Add to .env: GEMINI_API_KEY=your-key-here"));
+      console.log(dim("  To fix: add GEMINI_API_KEY=your-key-here to the .env file"));
+      console.log(dim(`  Get a free key: ${sky("https://aistudio.google.com/apikey")}`));
       console.log("");
     }
 
-    console.log(`  Run ${sky("'wispy gateway'")} to start the server!`);
-    console.log(`  Or  ${sky("'wispy chat'")} for interactive CLI mode.`);
+    console.log(skyBold("  What to do next:\n"));
+    console.log(`  ${sky("wispy chat")}             Start chatting with Wispy`);
+    console.log(`  ${sky("wispy gateway")}          Start the server (Telegram + REST + Web)`);
+    console.log(`  ${sky("wispy doctor")}           Check if everything is working`);
+    console.log(`  ${sky("wispy onboard")}          Re-run this wizard anytime`);
     console.log("");
-    console.log(dim("  Helpful links:"));
-    console.log(dim(`  • Get API Key: ${sky("https://aistudio.google.com/apikey")}`));
-    console.log(dim(`  • Vertex AI:   ${sky("https://cloud.google.com/vertex-ai")}`));
-    console.log(dim(`  • Telegram:    ${sky("https://t.me/BotFather")}`));
-    console.log(dim(`  • Qwen3-TTS:   ${sky("https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")}`));
+    console.log(dim("  Try saying: \"Build me a todo app\" or \"Research AI trends in 2026\""));
+    console.log("");
+    console.log(dim("  Docs:     https://docs.wispy.cc"));
+    console.log(dim("  Help:     https://github.com/hausorlabs/wispy/issues"));
     console.log("");
   } catch (err: any) {
     rl.close();
