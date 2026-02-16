@@ -1,9 +1,4 @@
-<div align="center">
-  <a href="https://youtu.be/U7KddE5Yg1c?si=aj0V0K3UE1LICO5z">
-    <img src="https://img.youtube.com/vi/U7KddE5Yg1c/maxresdefault.jpg" alt="Watch the Demo" width="100%">
-  </a>
-  <p><strong>▶ Click to watch the demo</strong></p>
-</div>
+<iframe width="560" height="315" src="https://www.youtube.com/embed/U7KddE5Yg1c?si=43xmhaIq74RMv3Ua" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
 # Wispy -- An Autonomous AI Agent That Discovers, Decides, Pays, and Delivers
 
