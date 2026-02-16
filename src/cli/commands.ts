@@ -362,10 +362,10 @@ const commands: SlashCommand[] = [
   },
   {
     name: "wallet",
-    description: "Wallet management [export|import|commerce|fund]",
+    description: "Wallet management [export|import|recovery|recover|commerce|fund]",
     handler: async (args, ctx) => {
       const chalk = (await import("chalk")).default;
-      const { getWalletAddress, getBalance, exportWalletPrivateKey, importWalletFromKey } = await import("../wallet/x402.js");
+      const { getWalletAddress, getBalance, exportWalletPrivateKey, importWalletFromKey, exportWalletMnemonic, recoverWalletFromMnemonic } = await import("../wallet/x402.js");
       const { getCommerceEngine } = await import("../wallet/commerce.js");
       const { loadOrCreateIdentity } = await import("../security/device-identity.js");
 
@@ -410,6 +410,59 @@ const commands: SlashCommand[] = [
           console.log(`  Chain:   ${info.chain}\n`);
         } catch (err: any) {
           console.log(chalk.red(`\n  Import failed: ${err.message}\n`));
+        }
+        return;
+      }
+
+      // /wallet recovery — show 12-word recovery phrase
+      if (subcommand === "recovery") {
+        const addr = getWalletAddress(ctx.runtimeDir);
+        if (!addr) { console.log(t.dim("\nWallet not initialized.\n")); return; }
+
+        console.log(chalk.bold.yellow("\n  WARNING: Your recovery phrase will be displayed."));
+        console.log(chalk.yellow("  Anyone with these 12 words can steal your funds."));
+        console.log(chalk.yellow("  Never share them. Never type them online.\n"));
+
+        const identity = loadOrCreateIdentity(ctx.runtimeDir);
+        const mnemonic = exportWalletMnemonic(ctx.runtimeDir, identity);
+
+        if (!mnemonic) {
+          console.log(chalk.dim("  No recovery phrase stored for this wallet."));
+          console.log(chalk.dim("  (Wallets imported from a private key don't have one.)\n"));
+          return;
+        }
+
+        console.log(chalk.bold("  Wallet:  ") + addr);
+        console.log(chalk.bold("  Phrase:  ") + chalk.dim("(12 words)\n"));
+        const words = mnemonic.split(" ");
+        for (let i = 0; i < words.length; i += 3) {
+          const row = words.slice(i, i + 3).map((w, j) => {
+            const num = String(i + j + 1).padStart(2, " ");
+            return chalk.dim(`${num}.`) + ` ${chalk.bold(w.padEnd(10))}`;
+          }).join("  ");
+          console.log(`    ${row}`);
+        }
+        console.log();
+        return;
+      }
+
+      // /wallet recover <12 words> — recover wallet from mnemonic
+      if (subcommand === "recover") {
+        const phrase = parts.slice(1).join(" ").trim();
+        if (!phrase || phrase.split(/\s+/).length < 12) {
+          console.log(chalk.red("\n  Usage: /wallet recover word1 word2 word3 ... word12\n"));
+          console.log(chalk.dim("  Enter all 12 words of your recovery phrase separated by spaces.\n"));
+          return;
+        }
+
+        try {
+          const identity = loadOrCreateIdentity(ctx.runtimeDir);
+          const info = recoverWalletFromMnemonic(ctx.runtimeDir, identity, phrase);
+          console.log(chalk.green(`\n  Wallet recovered successfully!`));
+          console.log(`  Address: ${chalk.cyan(info.address)}`);
+          console.log(`  Chain:   ${info.chain}\n`);
+        } catch (err: any) {
+          console.log(chalk.red(`\n  Recovery failed: ${err.message}\n`));
         }
         return;
       }
@@ -514,7 +567,7 @@ const commands: SlashCommand[] = [
       }
 
       console.log();
-      console.log(t.dim("  Subcommands: /wallet export | import | commerce | fund\n"));
+      console.log(t.dim("  Subcommands: /wallet export | import | recovery | recover | commerce | fund\n"));
     },
   },
   {

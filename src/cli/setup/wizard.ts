@@ -457,17 +457,37 @@ export async function runSetupWizard(opts: {
             agentPrivateKey = "0x" + agentPrivateKey;
           }
         } else {
-          // Generate a new key using viem
+          // Generate a new wallet with recovery phrase
           try {
-            const { generatePrivateKey, privateKeyToAccount } = await import("viem/accounts");
-            agentPrivateKey = generatePrivateKey();
-            const account = privateKeyToAccount(agentPrivateKey as `0x${string}`);
+            const { ethers } = await import("ethers");
+            const wallet = ethers.Wallet.createRandom();
+            agentPrivateKey = wallet.privateKey;
+            const mnemonic = wallet.mnemonic?.phrase || "";
             console.log("");
-            console.log(green(`  ✓ Generated new wallet!`));
-            console.log(`  ${dim("Address:")} ${sky(account.address)}`);
-            console.log(yellowBright(`  ⚠ Save your private key securely. It will be stored in .env`));
+            console.log(green(`  ✓ Generated new wallet!\n`));
+            console.log(`  ${dim("Address:")} ${sky(wallet.address)}`);
+            if (mnemonic) {
+              console.log("");
+              console.log(yellowBright(`  ┌─────────────────────────────────────────────────┐`));
+              console.log(yellowBright(`  │  RECOVERY PHRASE — Write this down on paper!    │`));
+              console.log(yellowBright(`  └─────────────────────────────────────────────────┘`));
+              console.log("");
+              const words = mnemonic.split(" ");
+              for (let i = 0; i < words.length; i += 3) {
+                const row = words.slice(i, i + 3).map((w, j) => {
+                  const num = String(i + j + 1).padStart(2, " ");
+                  return `${dim(num + ".")} ${bold(w.padEnd(10))}`;
+                }).join("  ");
+                console.log(`    ${row}`);
+              }
+              console.log("");
+              console.log(yellowBright("  ⚠ This is the ONLY time you will see this phrase."));
+              console.log(dim("    You can recover your wallet with these 12 words."));
+              console.log(dim("    Never share them. Never type them online.\n"));
+              await ask(rl, dim("  Press Enter once you have saved your recovery phrase..."));
+            }
           } catch {
-            console.log(yellowBright("  ⚠ Could not generate key (viem not available)."));
+            console.log(yellowBright("  ⚠ Could not generate wallet."));
             console.log(dim("  Add AGENT_PRIVATE_KEY=0x... to .env manually.\n"));
           }
         }

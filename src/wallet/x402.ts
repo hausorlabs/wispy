@@ -17,6 +17,7 @@ export interface WalletInfo {
 export interface WalletState {
   info: WalletInfo;
   encryptedKey: string;
+  encryptedMnemonic?: string;
 }
 
 const USDC_BASE_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -40,9 +41,11 @@ export function initWallet(
     return existing.info;
   }
 
-  // Generate new wallet
+  // Generate new wallet with mnemonic recovery phrase
   const wallet = ethers.Wallet.createRandom();
   const encryptedKey = encryptCredential(identity, wallet.privateKey);
+  const mnemonic = wallet.mnemonic?.phrase || "";
+  const encryptedMnemonic = mnemonic ? encryptCredential(identity, mnemonic) : undefined;
 
   const state: WalletState = {
     info: {
@@ -51,6 +54,7 @@ export function initWallet(
       createdAt: new Date().toISOString(),
     },
     encryptedKey,
+    encryptedMnemonic,
   };
 
   writeJSON(walletPath, state);
@@ -111,6 +115,52 @@ export function exportWalletPrivateKey(
   const privateKey = decryptCredential(identity, state.encryptedKey);
   log.warn("Private key exported for address %s — keep it safe!", state.info.address);
   return privateKey;
+}
+
+/**
+ * Export the wallet's mnemonic recovery phrase (12 words).
+ * Returns null if the wallet was imported without a mnemonic.
+ */
+export function exportWalletMnemonic(
+  runtimeDir: string,
+  identity: DeviceIdentity
+): string | null {
+  const state = readJSON<WalletState>(getWalletPath(runtimeDir));
+  if (!state) throw new Error("Wallet not initialized");
+  if (!state.encryptedMnemonic) return null;
+
+  const mnemonic = decryptCredential(identity, state.encryptedMnemonic);
+  log.warn("Recovery phrase exported for %s — keep it safe!", state.info.address);
+  return mnemonic;
+}
+
+/**
+ * Recover a wallet from a mnemonic phrase.
+ * Overwrites the existing wallet.
+ */
+export function recoverWalletFromMnemonic(
+  runtimeDir: string,
+  identity: DeviceIdentity,
+  mnemonic: string,
+  chain: string = "base"
+): WalletInfo {
+  const walletPath = getWalletPath(runtimeDir);
+  ensureDir(resolve(runtimeDir, "wallet"));
+
+  const wallet = ethers.Wallet.fromPhrase(mnemonic.trim());
+  const encryptedKey = encryptCredential(identity, wallet.privateKey);
+  const encryptedMnemonic = encryptCredential(identity, mnemonic.trim());
+
+  const info: WalletInfo = {
+    address: wallet.address,
+    chain,
+    createdAt: new Date().toISOString(),
+  };
+
+  const state: WalletState = { info, encryptedKey, encryptedMnemonic };
+  writeJSON(walletPath, state);
+  log.info("Wallet recovered from mnemonic: %s on %s", wallet.address, chain);
+  return info;
 }
 
 /**
