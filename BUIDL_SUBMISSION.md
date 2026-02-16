@@ -1,4 +1,9 @@
-[![Watch the Demo](https://img.youtube.com/vi/U7KddE5Yg1c/maxresdefault.jpg)](https://youtu.be/U7KddE5Yg1c?si=aj0V0K3UE1LICO5z)
+<div align="center">
+  <a href="https://youtu.be/U7KddE5Yg1c?si=aj0V0K3UE1LICO5z">
+    <img src="https://img.youtube.com/vi/U7KddE5Yg1c/maxresdefault.jpg" alt="Watch the Demo" width="100%">
+  </a>
+  <p><strong>▶ Click to watch the demo</strong></p>
+</div>
 
 # Wispy -- An Autonomous AI Agent That Discovers, Decides, Pays, and Delivers
 
