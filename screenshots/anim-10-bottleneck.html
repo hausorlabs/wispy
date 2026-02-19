@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wispy - The Commerce Bottleneck</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Instrument Sans',-apple-system,sans-serif;background:linear-gradient(180deg,#8ACFEA 0%,#c5e5f5 50%,#FAFDFF 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+
+    /* ── Animations ── */
+    @keyframes fadeIn{to{opacity:1}}
+    @keyframes slideUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes popIn{to{opacity:1;transform:scale(1) translateY(0)}}
+
+    /* ── Scene ── */
+    .scene{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center}
+
+    /* Context line */
+    .context{display:flex;align-items:center;gap:10px;margin-bottom:32px;opacity:0;animation:slideUp .6s ease forwards .5s}
+    .ctx-dot{width:8px;height:8px;border-radius:50%;background:#ef4444;box-shadow:0 0 12px rgba(239,68,68,0.4);animation:ctxBlink 1.8s ease-in-out infinite}
+    @keyframes ctxBlink{0%,100%{opacity:1}50%{opacity:.35}}
+    .ctx-text{font-family:'JetBrains Mono',monospace;font-size:13px;color:#1A1A2E}
+    .ctx-text span{color:#ef4444;font-weight:500}
+
+    /* HTTP 402 block */
+    .http-block{background:#fff;border:1px solid rgba(0,0,0,0.06);border-radius:14px;padding:18px 24px;margin-bottom:36px;width:440px;box-shadow:0 4px 16px rgba(0,0,0,0.06);opacity:0;animation:slideUp .6s ease forwards 1.8s}
+    .http-header{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+    .http-method{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:#1BC47D;background:rgba(27,196,125,0.1);padding:3px 8px;border-radius:6px}
+    .http-url{font-family:'JetBrains Mono',monospace;font-size:12px;color:#475569}
+    .http-response{display:flex;align-items:center;gap:8px}
+    .http-status{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:#ef4444}
+    .http-label{font-size:14px;color:#475569;font-weight:500}
+
+    /* Wallet popup */
+    .wallet-popup{width:380px;background:#fff;border-radius:20px;padding:28px 28px 22px;box-shadow:0 12px 40px rgba(0,0,0,0.08),0 2px 8px rgba(0,0,0,0.04);opacity:0;transform:scale(0.85) translateY(30px);animation:popIn .7s cubic-bezier(.34,1.56,.64,1) forwards 3.4s;position:relative}
+
+    .wp-icon{width:52px;height:52px;background:linear-gradient(135deg,#f59e0b,#ef4444);border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+    .wp-icon i{font-size:28px;color:#fff}
+    .wp-title{font-size:17px;font-weight:700;color:#111;text-align:center;margin-bottom:4px}
+    .wp-sub{font-size:13px;color:#888;text-align:center;margin-bottom:18px}
+    .wp-details{background:#f8f9fb;border-radius:12px;padding:14px 16px;margin-bottom:20px;font-size:13px;color:#555;line-height:2}
+    .wp-details div{display:flex;justify-content:space-between}
+    .wp-details span{font-weight:600;color:#111}
+    .wp-btn{width:100%;padding:13px;border-radius:12px;border:none;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}
+    .wp-approve{background:#3b82f6;color:#fff;margin-bottom:10px}
+    .wp-reject{background:#f3f4f6;color:#666}
+
+    /* ── Cursor ── */
+    .cursor-container{position:absolute;z-index:20;bottom:68px;left:50%;opacity:0;animation:fadeIn .4s ease forwards 5.2s}
+    .cursor-wrapper{animation:cursorTravel 2s cubic-bezier(.4,.0,.2,1) forwards 5.2s}
+    @keyframes cursorTravel{
+      0%{transform:translate(60px,-120px)}
+      40%{transform:translate(20px,-40px)}
+      70%{transform:translate(5px,-8px)}
+      100%{transform:translate(0,0)}
+    }
+    .cursor-idle{animation:cursorFloat 3s ease-in-out infinite 7.2s}
+    @keyframes cursorFloat{
+      0%,100%{transform:translate(0,0)}
+      25%{transform:translate(2px,1.5px)}
+      50%{transform:translate(-1px,3px)}
+      75%{transform:translate(1.5px,-1px)}
+    }
+    .cursor-svg{width:28px;height:28px;filter:drop-shadow(0 3px 8px rgba(0,0,0,0.25))}
+
+    /* ── Freeze overlay ── */
+    .freeze{position:absolute;inset:-4px;border-radius:22px;opacity:0;animation:fadeIn .6s ease forwards 8s;pointer-events:none;overflow:hidden}
+    .freeze-tint{position:absolute;inset:0;background:rgba(239,68,68,0.05);border:2px solid rgba(239,68,68,0.2);border-radius:22px}
+    .freeze-scanlines{position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 4px,rgba(239,68,68,0.03) 4px,rgba(239,68,68,0.03) 5px)}
+
+    /* Waiting label */
+    .waiting{position:absolute;bottom:72px;left:0;right:0;text-align:center;font-size:11px;font-weight:600;color:#ef4444;letter-spacing:.05em;text-transform:uppercase;opacity:0;animation:slideUp .5s ease forwards 8.8s}
+
+    /* ── Bottleneck badge ── */
+    .bottleneck{margin-top:36px;opacity:0;transform:scale(0.6);animation:badgePop .6s cubic-bezier(.34,1.56,.64,1) forwards 9.8s}
+    @keyframes badgePop{to{opacity:1;transform:scale(1)}}
+    .bn-inner{display:inline-flex;flex-direction:column;align-items:center;gap:6px;background:#fff;border:1.5px solid rgba(239,68,68,0.3);padding:16px 40px;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,0.08)}
+    .bn-title{font-size:20px;font-weight:700;color:#ef4444;letter-spacing:-0.02em}
+    .bn-sub{font-size:13px;color:#64748B}
+  </style>
+</head>
+<body>
+<div class="scene">
+  <!-- Context line -->
+  <div class="context">
+    <div class="ctx-dot"></div>
+    <div class="ctx-text">Agent received <span>HTTP 402 Payment Required</span></div>
+  </div>
+
+  <!-- HTTP response block -->
+  <div class="http-block">
+    <div class="http-header">
+      <span class="http-method">GET</span>
+      <span class="http-url">api.weather.pro/v1/nairobi</span>
+    </div>
+    <div class="http-response">
+      <span class="http-status">402</span>
+      <span class="http-label">Payment Required &mdash; $0.001 USDC</span>
+    </div>
+  </div>
+
+  <!-- Wallet popup -->
+  <div class="wallet-popup">
+    <div class="wp-icon"><i class="ti ti-wallet"></i></div>
+    <div class="wp-title">Approve Transaction?</div>
+    <div class="wp-sub">api.weather.pro wants to charge your wallet</div>
+    <div class="wp-details">
+      <div>Network <span>Ethereum Mainnet</span></div>
+      <div>Amount <span>$0.001 USDC</span></div>
+      <div>Est. gas <span>~$0.12 ETH</span></div>
+      <div>Recipient <span>0x742d...2bD28</span></div>
+    </div>
+    <button class="wp-btn wp-approve">Approve</button>
+    <button class="wp-btn wp-reject">Reject</button>
+
+    <!-- Animated cursor -->
+    <div class="cursor-container">
+      <div class="cursor-wrapper">
+        <div class="cursor-idle">
+          <svg class="cursor-svg" viewBox="0 0 24 24" fill="white" stroke="#222" stroke-width="1"><path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86a.5.5 0 0 1 .35-.15h6.87c.45 0 .67-.53.35-.85L5.86 2.36a.5.5 0 0 0-.36-.15z"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Freeze overlay -->
+    <div class="freeze">
+      <div class="freeze-tint"></div>
+      <div class="freeze-scanlines"></div>
+    </div>
+
+    <!-- Waiting label -->
+    <div class="waiting">Waiting for human approval...</div>
+  </div>
+
+  <!-- Bottleneck badge -->
+  <div class="bottleneck">
+    <div class="bn-inner">
+      <div class="bn-title">The Commerce Bottleneck</div>
+      <div class="bn-sub">Agents can't transact without human approval</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
