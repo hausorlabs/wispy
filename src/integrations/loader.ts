@@ -98,6 +98,7 @@ async function importAllIntegrations(ctx: IntegrationContext): Promise<Integrati
 
   // AI Models
   await importSafe("./ai-models/openai.js");
+  await importSafe("./ai-models/anthropic.js");
   await importSafe("./ai-models/ollama.js");
   await importSafe("./ai-models/groq.js");
   await importSafe("./ai-models/openrouter.js");
@@ -131,9 +132,6 @@ async function importAllIntegrations(ctx: IntegrationContext): Promise<Integrati
 
   // Browser Engine (full-spectrum browser automation)
   await importSafe("./browser-engine/index.js");
-
-  // Agentic Commerce (x402 hackathon)
-  await importSafe("./agentic-commerce/index.js");
 
   return instances;
 }
