@@ -22,10 +22,18 @@ GETTING_STARTED.md
 USE_CASES.md
 WHAT_WE_SOLVE.md
 CHANGELOG.md
+AUTONOMOUS_VISION.md
+PRODUCTION_READY.md
 copy-tests.ps1
 
 # Memory files (runtime, not shipped)
 wispy/memory/*.md
+
+# Generated / local-only
+browser-profiles.db
+screenshots/
+frontend/README.md
+src/integrations/agentic-commerce/README.md
 
 # Secrets / credentials
 gen-lang-client-*.json
