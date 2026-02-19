@@ -30,7 +30,15 @@ export interface ChannelEvent {
 
 export type ChannelEventListener = (event: ChannelEvent) => void;
 
+/** Cross-channel dispatch functions for sending media/messages from any channel */
+export interface ChannelDispatcher {
+  sendMessage: (chatId: string, text: string) => Promise<boolean>;
+  sendImage: (chatId: string, imagePath: string, caption?: string) => Promise<boolean>;
+  sendDocument?: (chatId: string, filePath: string, caption?: string) => Promise<boolean>;
+}
+
 const registry = new Map<string, ChannelDock>();
+const dispatchers = new Map<string, ChannelDispatcher>();
 const eventListeners = new Map<string, ChannelEventListener[]>();
 
 export function registerChannel(dock: ChannelDock) {
@@ -56,6 +64,16 @@ export function updateChannelStatus(
     ch.error = error;
     if (status === "connected") ch.connectedAt = new Date().toISOString();
   }
+}
+
+/** Register a channel's dispatch functions for cross-channel sending */
+export function registerChannelDispatcher(channelName: string, dispatcher: ChannelDispatcher): void {
+  dispatchers.set(channelName, dispatcher);
+}
+
+/** Get a registered channel dispatcher */
+export function getChannelDispatcher(channelName: string): ChannelDispatcher | undefined {
+  return dispatchers.get(channelName);
 }
 
 /**

@@ -19,6 +19,7 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
       type: "object",
       properties: {
         command: { type: "string", description: "The shell command to execute" },
+        cwd: { type: "string", description: "Working directory to run the command in (absolute path). Defaults to workspace if not provided." },
       },
       required: ["command"],
     },
@@ -36,11 +37,11 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
   },
   {
     name: "file_write",
-    description: "Write content to a file. Creates parent directories. Use for: creating files, writing code, saving data.",
+    description: "Write content to a file anywhere on the filesystem. Creates parent directories automatically. Use for: creating files, writing code, saving data. Supports absolute paths (C:/Users/...) for local projects or relative paths for workspace.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Absolute file path" },
+        path: { type: "string", description: "File path (absolute recommended, e.g. 'C:/Users/me/Projects/app/index.html'). Relative paths resolve to workspace." },
         content: { type: "string", description: "Content to write" },
       },
       required: ["path", "content"],
@@ -60,22 +61,22 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
   },
   {
     name: "list_directory",
-    description: "List files and folders in a directory. Use for: exploring file structure.",
+    description: "List files and folders in any directory on the filesystem. Use for: exploring file structure, browsing local projects.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Directory path to list" },
+        path: { type: "string", description: "Absolute directory path (e.g. 'C:/Users/me/Projects')" },
       },
       required: ["path"],
     },
   },
   {
     name: "create_folder",
-    description: "Create a new folder/directory. Creates parent directories if needed. Use for: organizing files, setting up project structure.",
+    description: "Create a new folder/directory anywhere on the filesystem. Creates parent directories if needed. Use for: organizing files, setting up project structure.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Absolute path of the folder to create" },
+        path: { type: "string", description: "Folder path (absolute recommended, e.g. 'C:/Users/me/Projects/my-app'). Relative paths resolve to workspace." },
       },
       required: ["path"],
     },
@@ -330,7 +331,7 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
   },
   {
     name: "send_image_to_chat",
-    description: "Send an image file back to the user in the current chat (Telegram/WhatsApp). Use after taking screenshots or generating images.",
+    description: "Send an image file to the user via Telegram or WhatsApp. Works from ANY channel -- if called from CLI it dispatches to the user's connected Telegram. Always use this after generating images when the user asks to send them.",
     parameters: {
       type: "object",
       properties: {
@@ -343,7 +344,7 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
   // === Wallet ===
   {
     name: "wallet_balance",
-    description: "Check crypto wallet balance (USDC on Base).",
+    description: "Check crypto wallet balance. Uses SKALE BITE V2 (gasless) when AGENT_PRIVATE_KEY is set, otherwise Base Sepolia. Shows USDC balance and wallet address.",
     parameters: {
       type: "object",
       properties: {},
@@ -351,7 +352,7 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
   },
   {
     name: "wallet_pay",
-    description: "Execute a real USDC transfer on Base. Subject to commerce policy (spending limits, recipient controls). Small amounts may auto-approve; larger amounts require human approval.",
+    description: "Send USDC to an address. Uses SKALE BITE V2 (gasless) when AGENT_PRIVATE_KEY is set, otherwise Base. Subject to commerce policy (spending limits, recipient controls).",
     parameters: {
       type: "object",
       properties: {
@@ -363,7 +364,7 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
   },
   {
     name: "commerce_status",
-    description: "Check commerce policy, spending limits, and today's payment activity.",
+    description: "Check commerce policy, spending limits, wallet balance, and today's payment activity. Shows full audit trail on SKALE when AGENT_PRIVATE_KEY is set.",
     parameters: {
       type: "object",
       properties: {},
@@ -553,6 +554,18 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
         minScore: { type: "number", description: "Minimum reputation score required (default: 70)" },
       },
       required: ["agentId"],
+    },
+  },
+  // === Hackathon Tools: ERC-8004 Deploy ===
+  {
+    name: "deploy_erc8004",
+    description: "Deploy ERC-8004 Trustless Agent Identity contracts on SKALE BITE V2 (gasless). Deploys IdentityRegistry, ReputationRegistry, ValidationRegistry. Requires AGENT_PRIVATE_KEY.",
+    parameters: {
+      type: "object",
+      properties: {
+        register_agent: { type: "boolean", description: "Also register this agent's identity after deployment (default: true)" },
+        agent_uri: { type: "string", description: "Custom agent URI for registration (default: auto-generated)" },
+      },
     },
   },
   // === Hackathon Tools: A2A Protocol ===
@@ -759,6 +772,31 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
       required: ["topic", "sections", "outputPath"],
     },
   },
+  // === x402 Audit Report ===
+  {
+    name: "generate_x402_report",
+    description: "Generate a professional x402 agentic commerce audit report as PDF. Creates a LaTeX document with transaction logs, track results, on-chain verification links, and spending summary. Uses Wispy whitepaper styling.",
+    parameters: {
+      type: "object",
+      properties: {
+        outputPath: { type: "string", description: "Output path for the PDF report (absolute or relative). Example: C:\\Users\\Windows\\x402-audit-report.pdf" },
+        agentAddress: { type: "string", description: "Agent wallet address (0x...)" },
+        sellerAddress: { type: "string", description: "Seller/recipient wallet address (0x...)" },
+        network: { type: "string", description: "Network name (e.g. SKALE BITE V2 Sandbox)" },
+        chainId: { type: "number", description: "Chain ID (e.g. 103698795)" },
+        explorerUrl: { type: "string", description: "Block explorer base URL" },
+        transactions: { type: "string", description: "JSON array of transactions: [{service, amount, recipient, txHash, status, timestamp, reason?}]" },
+        tracks: { type: "string", description: "JSON array of track results: [{track, title, status, summary, toolCalls?, payments?, spent?}]" },
+        totalSpent: { type: "number", description: "Total USDC spent" },
+        title: { type: "string", description: "Report title (optional)" },
+        subtitle: { type: "string", description: "Report subtitle (optional)" },
+        author: { type: "string", description: "Report author (optional, default: Wispy AI Agent)" },
+        duration: { type: "string", description: "Demo/session duration (optional)" },
+        demoTurns: { type: "number", description: "Number of demo turns (optional)" },
+      },
+      required: ["outputPath", "agentAddress", "network", "chainId", "explorerUrl", "transactions", "tracks", "totalSpent"],
+    },
+  },
   // === Telegram Document Delivery ===
   {
     name: "send_document_to_telegram",
@@ -772,6 +810,17 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
         voiceText: { type: "string", description: "Text for voice note if withVoice is true" },
       },
       required: ["filePath"],
+    },
+  },
+  {
+    name: "telegram_list_files",
+    description: "List files in a directory and send the listing to the user via Telegram. Defaults to ~/Downloads if no directory specified.",
+    parameters: {
+      type: "object",
+      properties: {
+        directory: { type: "string", description: "Directory path to list (default: ~/Downloads)" },
+        sendFile: { type: "string", description: "If specified, also send this file path as a document attachment" },
+      },
     },
   },
   {
@@ -969,6 +1018,67 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
         fps: { type: "number", description: "Frames per second. Default: 15" },
         region: { type: "string", description: "Region: 'full' or 'active'. Default: full" },
       },
+      required: [],
+    },
+  },
+  // === Webcam & Live Vision ===
+  {
+    name: "webcam_capture",
+    description: "Capture a single frame from the webcam camera. Returns the image file path.",
+    parameters: {
+      type: "object",
+      properties: {
+        device: { type: "string", description: "Camera device name or ID (platform-specific). Uses default camera if not specified." },
+        width: { type: "number", description: "Capture width in pixels. Default: 1280" },
+        height: { type: "number", description: "Capture height in pixels. Default: 720" },
+        sendToChat: { type: "boolean", description: "Send the captured image to the current Telegram chat" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "webcam_record",
+    description: "Record a short video clip from the webcam. Max 30 seconds. Returns the video file path.",
+    parameters: {
+      type: "object",
+      properties: {
+        duration: { type: "number", description: "Recording duration in seconds. Default: 10, max: 30" },
+        fps: { type: "number", description: "Frames per second. Default: 15" },
+        device: { type: "string", description: "Camera device name or ID. Uses default camera if not specified." },
+        sendToChat: { type: "boolean", description: "Send the recorded video to the current Telegram chat" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "webcam_list_devices",
+    description: "List available webcam/video capture devices on this system.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "webcam_live_start",
+    description: "Start a live vision stream: captures webcam frames at intervals and analyzes each with Gemini vision. Streams real-time analysis back to the user.",
+    parameters: {
+      type: "object",
+      properties: {
+        intervalMs: { type: "number", description: "Time between frame captures in ms. Default: 2000 (2 seconds)" },
+        maxFrames: { type: "number", description: "Max frames to analyze before auto-stopping. Default: 30" },
+        prompt: { type: "string", description: "Custom analysis prompt for Gemini vision. Default: 'Describe what you see'" },
+        device: { type: "string", description: "Camera device name or ID. Uses default if not specified." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "webcam_live_stop",
+    description: "Stop the active live vision stream and return a summary of frames analyzed.",
+    parameters: {
+      type: "object",
+      properties: {},
       required: [],
     },
   },

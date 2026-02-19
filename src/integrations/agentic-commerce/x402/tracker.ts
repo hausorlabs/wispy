@@ -4,7 +4,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { COMMERCE_DEFAULTS } from "../config.js";
+import chalk from "chalk";
+import { COMMERCE_DEFAULTS, explorerTxLink } from "../config.js";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -16,6 +17,8 @@ export interface SpendRecord {
   amount: number;
   recipient: string;
   txHash: string;
+  /** CAIP-2 network identifier (e.g. "eip155:8453" for Base) */
+  network?: string;
   blockNumber?: number;
   status: "settled" | "pending" | "failed";
   reason: string;
@@ -108,9 +111,13 @@ export class SpendTracker {
       }),
     );
 
+    const networks = [...new Set(settled.map((r) => r.network).filter(Boolean))];
+    const networkLabel = networks.length > 0
+      ? networks.map((n) => n === "eip155:8453" ? "Base Mainnet" : `SKALE (${n})`).join(", ")
+      : "SKALE BITE V2 Sandbox (eip155:103698795)";
     return {
       agentAddress: this.agentAddress,
-      network: "SKALE BITE V2 Sandbox (eip155:103698795)",
+      network: networkLabel,
       period: {
         from: timestamps[0] ?? new Date().toISOString(),
         to: timestamps[timestamps.length - 1] ?? new Date().toISOString(),
@@ -125,62 +132,76 @@ export class SpendTracker {
     };
   }
 
-  /** Format audit report as human-readable markdown */
+  /** Format audit report as chalk-colored CLI output */
   formatReport(): string {
     const report = this.getReport();
+    const cyan = chalk.cyan;
+    const green = chalk.green;
+    const yellow = chalk.yellow;
+    const dim = chalk.dim;
+    const bold = chalk.bold;
+    const white = chalk.white;
+
     const lines: string[] = [
-      `## x402 Spend Audit Report`,
       ``,
-      `**Agent:** \`${report.agentAddress}\``,
-      `**Network:** ${report.network}`,
-      `**Period:** ${report.period.from} to ${report.period.to}`,
+      cyan.bold(`  ━━━ x402 Spend Audit Report ━━━`),
       ``,
-      `### Summary`,
-      `| Metric | Value |`,
-      `|--------|-------|`,
-      `| Total Spent | $${report.totalSpent.toFixed(6)} USDC |`,
-      `| Transactions | ${report.totalTransactions} |`,
-      `| Budget Remaining | $${report.budgetRemaining.toFixed(6)} USDC |`,
-      `| Daily Limit | $${report.dailyLimit.toFixed(2)} USDC |`,
+      `  ${dim("Agent:")}     ${cyan(report.agentAddress)}`,
+      `  ${dim("Network:")}   ${white(report.network)}`,
+      `  ${dim("Period:")}    ${white(report.period.from.slice(0, 19))} ${dim("to")} ${white(report.period.to.slice(0, 19))}`,
       ``,
+      cyan(`  ┌─ Summary ──────────────────────────────────────────`),
+      `  ${cyan("│")} Total Spent:      ${green.bold("$" + report.totalSpent.toFixed(6))} ${dim("USDC")}`,
+      `  ${cyan("│")} Transactions:     ${bold.white(String(report.totalTransactions))}`,
+      `  ${cyan("│")} Budget Remaining: ${yellow("$" + report.budgetRemaining.toFixed(6))} ${dim("USDC")}`,
+      `  ${cyan("│")} Daily Limit:      ${white("$" + report.dailyLimit.toFixed(2))} ${dim("USDC")}`,
+      cyan(`  └────────────────────────────────────────────────────`),
     ];
 
     if (report.byRecipient.length > 0) {
-      lines.push(`### By Recipient`);
-      lines.push(`| Address | Total | Count |`);
-      lines.push(`|---------|-------|-------|`);
+      lines.push(``, cyan(`  ┌─ By Recipient ────────────────────────────────────`));
       for (const r of report.byRecipient) {
         lines.push(
-          `| \`${r.address.slice(0, 8)}...${r.address.slice(-6)}\` | $${r.total.toFixed(6)} | ${r.count} |`,
+          `  ${cyan("│")} ${cyan(r.address)}  ${green("$" + r.total.toFixed(6))}  ${dim("(" + r.count + " tx)")}`,
         );
       }
-      lines.push(``);
+      lines.push(cyan(`  └────────────────────────────────────────────────────`));
     }
 
     if (report.byService.length > 0) {
-      lines.push(`### By Service`);
-      lines.push(`| Service | Total | Count |`);
-      lines.push(`|---------|-------|-------|`);
+      lines.push(``, cyan(`  ┌─ By Service ──────────────────────────────────────`));
       for (const s of report.byService) {
-        lines.push(`| ${s.name} | $${s.total.toFixed(6)} | ${s.count} |`);
+        lines.push(
+          `  ${cyan("│")} ${bold.white(s.name.padEnd(16))} ${green("$" + s.total.toFixed(6))}  ${dim("(" + s.count + " tx)")}`,
+        );
       }
-      lines.push(``);
+      lines.push(cyan(`  └────────────────────────────────────────────────────`));
     }
 
-    lines.push(`### Transaction Log`);
-    lines.push(
-      `| # | Time | Service | Amount | Recipient | Tx Hash | Status |`,
-    );
-    lines.push(`|---|------|---------|--------|-----------|---------|--------|`);
+    lines.push(``, cyan(`  ┌─ Transaction Log ─────────────────────────────────`));
+    if (report.records.length === 0) {
+      lines.push(`  ${cyan("│")} ${dim("(no transactions recorded)")}`);
+    }
     for (let i = 0; i < report.records.length; i++) {
       const r = report.records[i];
-      const hash = r.txHash
-        ? `\`${r.txHash.slice(0, 10)}...\``
-        : "pending";
+      const isLast = i === report.records.length - 1;
+      const connector = isLast ? "╰" : "├";
+      const hasRealTx = r.txHash && r.txHash.startsWith("0x") && r.txHash.length >= 66;
+      const hash = hasRealTx ? cyan(r.txHash) : yellow("facilitator-settled");
+      const explorerUrl = hasRealTx
+        ? `\n  ${cyan("│")}   ${dim("Explorer:")} ${dim(explorerTxLink(r.txHash, r.network))}`
+        : "";
+      const statusColor = r.status === "settled" ? green : r.status === "failed" ? chalk.red : yellow;
       lines.push(
-        `| ${i + 1} | ${r.timestamp.slice(11, 19)} | ${r.service} | $${r.amount.toFixed(6)} | \`${r.recipient.slice(0, 8)}...\` | ${hash} | ${r.status} |`,
+        `  ${cyan(connector)}─ ${bold.white("#" + (i + 1))} ${dim("[")}${white(r.timestamp.slice(11, 19))}${dim("]")} ${bold.white(r.service)}`,
+        `  ${cyan("│")}   ${dim("Amount:")}    ${green("$" + r.amount.toFixed(6) + " USDC")}`,
+        `  ${cyan("│")}   ${dim("Recipient:")} ${cyan(r.recipient)}`,
+        `  ${cyan("│")}   ${dim("Tx:")}        ${hash}`,
+        `  ${cyan("│")}   ${dim("Status:")}    ${statusColor(r.status)}${explorerUrl}`,
+        `  ${cyan("│")}`,
       );
     }
+    lines.push(cyan(`  └────────────────────────────────────────────────────`));
 
     return lines.join("\n");
   }

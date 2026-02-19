@@ -19,7 +19,9 @@ import {
   SKALE_BITE_SANDBOX,
   SERVICE_PRICING,
   DEMO_PORTS,
+  DEMO_PORT_DEFAULTS,
 } from "../config.js";
+import { findFreePort } from "../../../infra/ports.js";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -52,7 +54,11 @@ function makeRouteConfig(payTo: string, price: string, network: Network, descrip
         scheme: "exact",
         network,
         payTo,
-        price: `$${Number(price) / 1_000_000}`,
+        price: {
+          amount: price,
+          asset: SKALE_BITE_SANDBOX.usdc,
+          extra: { name: "USDC", version: "1" },
+        },
         maxTimeoutSeconds: 300,
       },
     ],
@@ -87,7 +93,7 @@ function createWeatherApp(config: ServiceConfig): Express {
 
   app.get("/weather", (req: Request, res: Response) => {
     const city = (req.query.city as string) ?? "Nairobi";
-    console.log(`[seller:weather] Paid request for city=${city}`);
+    // Paid weather request served
     res.json({
       city,
       temperature: 24 + Math.round(Math.random() * 6),
@@ -131,7 +137,7 @@ function createSentimentApp(config: ServiceConfig): Express {
 
   app.post("/analyze", (req: Request, res: Response) => {
     const text = (req.body as { text?: string })?.text ?? "No text provided";
-    console.log(`[seller:sentiment] Paid analysis for: "${text.slice(0, 50)}..."`);
+    // Paid sentiment analysis served
 
     const sentiments = ["positive", "negative", "neutral"] as const;
     const sentiment = sentiments[Math.floor(Math.random() * 3)];
@@ -180,7 +186,7 @@ function createReportApp(config: ServiceConfig): Express {
   app.post("/report", (req: Request, res: Response) => {
     const body = req.body as { data?: unknown[]; format?: string };
     const format = body?.format ?? "summary";
-    console.log(`[seller:report] Paid report generation (format=${format})`);
+    // Paid report generation served
 
     res.json({
       title: "Agent-Generated Report",
@@ -211,10 +217,36 @@ function createReportApp(config: ServiceConfig): Express {
 // ─── Service Lifecycle ──────────────────────────────────────
 
 /**
+ * Try to close a port by connecting and immediately closing.
+ * Returns true if port was freed.
+ */
+async function ensurePortFree(port: number): Promise<void> {
+  // Close any existing services we're tracking
+  const existing = runningServices.filter((s) => s.port === port);
+  for (const svc of existing) {
+    await new Promise<void>((resolve) => svc.server.close(() => resolve()));
+  }
+  // Remove from tracking
+  const remaining = runningServices.filter((s) => s.port !== port);
+  runningServices.length = 0;
+  runningServices.push(...remaining);
+}
+
+/**
  * Start all mock x402 services.
  * @param sellerAddress - Wallet address to receive payments
  */
 export async function startAllServices(sellerAddress: string): Promise<void> {
+  // Clean up any running services from previous demo runs
+  if (runningServices.length > 0) {
+    await stopAllServices();
+  }
+
+  // Find free ports starting from defaults (allows multiple Wispy instances)
+  DEMO_PORTS.weather = await findFreePort(DEMO_PORT_DEFAULTS.weather);
+  DEMO_PORTS.sentiment = await findFreePort(DEMO_PORTS.weather + 1);
+  DEMO_PORTS.report = await findFreePort(DEMO_PORTS.sentiment + 1);
+
   const services: Array<{ name: string; port: number; app: Express }> = [
     {
       name: "weather",
@@ -252,13 +284,37 @@ export async function startAllServices(sellerAddress: string): Promise<void> {
   ];
 
   for (const svc of services) {
+    await ensurePortFree(svc.port);
     await new Promise<void>((resolve, reject) => {
       const server = svc.app.listen(svc.port, () => {
-        console.log(`[seller:${svc.name}] Listening on http://localhost:${svc.port}`);
         runningServices.push({ name: svc.name, port: svc.port, server });
         resolve();
       });
-      server.on("error", reject);
+      server.on("error", (err: NodeJS.ErrnoException) => {
+        if (err.code === "EADDRINUSE") {
+          // Port still in use from a crashed previous run — skip this service
+          console.log(`[seller:${svc.name}] Port ${svc.port} in use, trying to recover...`);
+          // Try to kill the port and retry once
+          const net = require("net") as typeof import("net");
+          const probe = net.createConnection({ port: svc.port }, () => {
+            probe.end();
+            // Port is genuinely in use by another process
+            reject(new Error(`Port ${svc.port} is already in use. Kill the process using it or restart Wispy.`));
+          });
+          probe.on("error", () => {
+            // Port was in TIME_WAIT, retry after a short delay
+            setTimeout(() => {
+              const retryServer = svc.app.listen(svc.port, () => {
+                runningServices.push({ name: svc.name, port: svc.port, server: retryServer });
+                resolve();
+              });
+              retryServer.on("error", reject);
+            }, 500);
+          });
+        } else {
+          reject(err);
+        }
+      });
     });
   }
 
@@ -267,9 +323,9 @@ export async function startAllServices(sellerAddress: string): Promise<void> {
   console.log(`Network: SKALE BITE V2 Sandbox (chain ${SKALE_BITE_SANDBOX.chainId})`);
   console.log(`Facilitator: ${SKALE_BITE_SANDBOX.facilitatorUrl}\n`);
   console.log(`Services running:`);
-  console.log(`  Weather API:    http://localhost:${DEMO_PORTS.weather}/weather?city=Nairobi  (${SERVICE_PRICING.weather.display}/call)`);
-  console.log(`  Sentiment API:  http://localhost:${DEMO_PORTS.sentiment}/analyze               (${SERVICE_PRICING.sentiment.display}/call)`);
-  console.log(`  Report API:     http://localhost:${DEMO_PORTS.report}/report                (${SERVICE_PRICING.report.display}/call)\n`);
+  console.log(`  Weather API:    http://127.0.0.1:${DEMO_PORTS.weather}/weather?city=Nairobi  (${SERVICE_PRICING.weather.display}/call)`);
+  console.log(`  Sentiment API:  http://127.0.0.1:${DEMO_PORTS.sentiment}/analyze               (${SERVICE_PRICING.sentiment.display}/call)`);
+  console.log(`  Report API:     http://127.0.0.1:${DEMO_PORTS.report}/report                (${SERVICE_PRICING.report.display}/call)\n`);
   console.log(`Ready for agent testing.\n`);
 }
 
@@ -278,7 +334,7 @@ export async function stopAllServices(): Promise<void> {
   for (const svc of runningServices) {
     await new Promise<void>((resolve) => {
       svc.server.close(() => {
-        console.log(`[seller:${svc.name}] Stopped`);
+        // Service stopped
         resolve();
       });
     });
@@ -286,11 +342,11 @@ export async function stopAllServices(): Promise<void> {
   runningServices.length = 0;
 }
 
-/** Get URLs for all services */
+/** Get URLs for all services (use 127.0.0.1 to avoid IPv6 issues on Windows) */
 export function getServiceUrls(): Record<string, string> {
   return {
-    weather: `http://localhost:${DEMO_PORTS.weather}/weather`,
-    sentiment: `http://localhost:${DEMO_PORTS.sentiment}/analyze`,
-    report: `http://localhost:${DEMO_PORTS.report}/report`,
+    weather: `http://127.0.0.1:${DEMO_PORTS.weather}/weather`,
+    sentiment: `http://127.0.0.1:${DEMO_PORTS.sentiment}/analyze`,
+    report: `http://127.0.0.1:${DEMO_PORTS.report}/report`,
   };
 }

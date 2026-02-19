@@ -72,6 +72,26 @@ export async function runDoctor(opts: DoctorOpts) {
     detail: "Upgrade Node.js to version 20 or later",
   });
 
+  // FFmpeg (optional, for webcam and screen recording)
+  let ffmpegAvailable = false;
+  try {
+    const { execSync } = await import("child_process");
+    const ffmpegVer = execSync("ffmpeg -version", { encoding: "utf8", stdio: "pipe" }).split("\n")[0];
+    ffmpegAvailable = true;
+    await check({
+      label: `FFmpeg available (${ffmpegVer.replace(/^ffmpeg version\s+/, "").split(" ")[0]})`,
+      pass: true,
+      fixable: false,
+    });
+  } catch {
+    await check({
+      label: "FFmpeg available (optional)",
+      pass: false,
+      fixable: false,
+      detail: "Required for webcam capture and screen recording. Install: https://ffmpeg.org/download.html",
+    });
+  }
+
   // System info
   if (opts.verbose) {
     console.log(chalk.dim(`    OS: ${os.type()} ${os.release()} (${os.arch()})`));

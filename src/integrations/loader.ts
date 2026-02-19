@@ -45,6 +45,16 @@ export async function loadIntegrations(
     }
   }
 
+  // Auto-enable agentic-commerce when AGENT_PRIVATE_KEY is detected
+  if (process.env.AGENT_PRIVATE_KEY && !enabledIds.includes("agentic-commerce")) {
+    try {
+      await registry.enable("agentic-commerce");
+      log.info("Auto-enabled agentic-commerce (AGENT_PRIVATE_KEY detected)");
+    } catch (err) {
+      log.warn("Failed to auto-enable agentic-commerce: %s", err);
+    }
+  }
+
   if (registry.enabledCount > 0) {
     log.info("Enabled %d integration(s)", registry.enabledCount);
   }
@@ -89,6 +99,9 @@ async function importAllIntegrations(ctx: IntegrationContext): Promise<Integrati
   // AI Models
   await importSafe("./ai-models/openai.js");
   await importSafe("./ai-models/ollama.js");
+  await importSafe("./ai-models/groq.js");
+  await importSafe("./ai-models/openrouter.js");
+  await importSafe("./ai-models/kimi.js");
 
   // Productivity
   await importSafe("./productivity/notion.js");
@@ -111,6 +124,13 @@ async function importAllIntegrations(ctx: IntegrationContext): Promise<Integrati
   // Social
   await importSafe("./social/twitter.js");
   await importSafe("./social/email-smtp.js");
+  await importSafe("./social/zoho-email.js");
+
+  // Agentic Commerce (x402 hackathon)
+  await importSafe("./agentic-commerce/index.js");
+
+  // Browser Engine (full-spectrum browser automation)
+  await importSafe("./browser-engine/index.js");
 
   // Agentic Commerce (x402 hackathon)
   await importSafe("./agentic-commerce/index.js");

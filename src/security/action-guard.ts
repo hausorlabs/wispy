@@ -20,6 +20,8 @@ const EXTERNAL_ACTIONS = new Set([
   "send_email",
   "tweet",
   "a2a_delegate",
+  "solana_transfer",
+  "solana_spl_transfer",
 ]);
 
 const DESTRUCTIVE_ACTIONS = new Set([

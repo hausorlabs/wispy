@@ -16,9 +16,19 @@ SUBMISSIONS.md
 DORAHACKS_SUBMISSION.md
 HACKATHON_PLAN.md
 HACKATHON_IMPLEMENT.md
+BUIDL_SUBMISSION.md
+KNOWLEDGE.md
+GETTING_STARTED.md
+USE_CASES.md
+WHAT_WE_SOLVE.md
+CHANGELOG.md
 copy-tests.ps1
+
+# Memory files (runtime, not shipped)
+wispy/memory/*.md
 
 # Secrets / credentials
 gen-lang-client-*.json
 *.pem
 *.key
+nul

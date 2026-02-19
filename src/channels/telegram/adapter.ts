@@ -5,7 +5,7 @@
  */
 
 import { Bot, type Context } from "grammy";
-import { registerChannel, updateChannelStatus, broadcastChannelEvent } from "../dock.js";
+import { registerChannel, updateChannelStatus, broadcastChannelEvent, registerChannelDispatcher } from "../dock.js";
 import { isPaired, pairUser } from "../../security/auth.js";
 import type { Agent } from "../../core/agent.js";
 import { createLogger } from "../../infra/logger.js";
@@ -51,6 +51,14 @@ function getToolEmoji(toolName: string): string {
     schedule_task: "📅",
     wallet_balance: "💰",
     wallet_pay: "💸",
+    commerce_status: "📊",
+    x402_pay_and_fetch: "💳",
+    defi_swap: "🔄",
+    defi_research: "📈",
+    bite_encrypt_payment: "🔐",
+    bite_check_and_execute: "🔓",
+    ap2_purchase: "🛒",
+    deploy_erc8004: "📜",
   };
   return emojiMap[toolName] || "🔧";
 }
@@ -123,6 +131,346 @@ export async function sendTelegramAudio(chatId: string, audioPath: string, title
   } catch (err) {
     log.error({ err }, "Failed to send Telegram audio");
     return false;
+  }
+}
+
+/**
+ * Send an image to a specific chat (for cross-channel dispatch from CLI)
+ */
+export async function sendTelegramImage(chatId: string, imagePath: string, caption?: string): Promise<boolean> {
+  if (!botInstance) {
+    log.warn("Telegram bot not initialized, cannot send image");
+    return false;
+  }
+  try {
+    const { InputFile } = await import("grammy");
+    const { readFileSync, existsSync } = await import("fs");
+    if (!existsSync(imagePath)) {
+      log.warn({ imagePath }, "Image file not found");
+      return false;
+    }
+    await botInstance.api.sendPhoto(
+      chatId,
+      new InputFile(readFileSync(imagePath), "image.png"),
+      caption ? { caption, parse_mode: "Markdown" } : undefined
+    );
+    return true;
+  } catch (err) {
+    log.error({ err }, "Failed to send Telegram image");
+    return false;
+  }
+}
+
+/**
+ * Send a document to a specific chat (for cross-channel dispatch from CLI)
+ */
+export async function sendTelegramDocument(chatId: string, filePath: string, caption?: string): Promise<boolean> {
+  if (!botInstance) {
+    log.warn("Telegram bot not initialized, cannot send document");
+    return false;
+  }
+  try {
+    const { InputFile } = await import("grammy");
+    const { createReadStream, existsSync } = await import("fs");
+    if (!existsSync(filePath)) {
+      log.warn({ filePath }, "Document file not found");
+      return false;
+    }
+    await botInstance.api.sendDocument(
+      chatId,
+      new InputFile(createReadStream(filePath)),
+      caption ? { caption, parse_mode: "Markdown" } : undefined
+    );
+    return true;
+  } catch (err) {
+    log.error({ err }, "Failed to send Telegram document");
+    return false;
+  }
+}
+
+// Track names for x402 demos
+const DEMO_TRACK_NAMES: Record<number, string> = {
+  1: "Overall Best Agentic App",
+  2: "Agentic Tool Usage on x402",
+  3: "Best Integration of AP2",
+  4: "Best Trading / DeFi Agent",
+  5: "Encrypted Agents (BITE v2)",
+  6: "Agentic Vision (Gemini 3)",
+};
+
+// Agent-driven demo prompts per track (realistic use-case framing)
+// Uses a function to resolve DEMO_PORTS at call time (supports dynamic ports for multi-instance)
+function getDemoPrompts(): Record<number, string> {
+  // Late import to get current dynamic ports
+  let wp = 4021, sp = 4022, rp = 4023;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const cfg = require("../../integrations/agentic-commerce/config.js");
+    wp = cfg.DEMO_PORTS?.weather ?? 4021;
+    sp = cfg.DEMO_PORTS?.sentiment ?? 4022;
+    rp = cfg.DEMO_PORTS?.report ?? 4023;
+  } catch { /* use defaults */ }
+
+  return {
+  1: `You are demonstrating Wispy's autonomous agentic commerce capabilities for the SF x402 Hackathon.
+
+SCENARIO: A logistics company needs real-time weather data for route planning in Nairobi.
+
+Steps:
+1. Use x402_pay_and_fetch to call the Weather API at http://127.0.0.1:${wp}/weather?city=Nairobi (reason: "Real-time weather for logistics route optimization")
+2. Use x402_check_budget to show budget awareness
+3. Use x402_audit_trail to show the payment audit trail
+
+IMPORTANT: Always use 127.0.0.1 (not localhost) for service URLs. Include explorer links in your summary. Say "TRACK 1 COMPLETE" when done.`,
+
+  2: `You are demonstrating x402 autonomous payments on SKALE for the SF Agentic Commerce Hackathon.
+
+SCENARIO: A market intelligence platform needs weather, sentiment, and summary reports.
+
+Steps:
+1. Use x402_pay_and_fetch to GET weather from http://127.0.0.1:${wp}/weather?city=Nairobi (reason: "Market weather correlation data")
+2. Use x402_pay_and_fetch to POST sentiment analysis to http://127.0.0.1:${sp}/analyze with body {"text":"SKALE blockchain enables gasless micro-payments for AI agents"} (reason: "Sentiment analysis for market intelligence")
+3. Use x402_pay_and_fetch to POST a report to http://127.0.0.1:${rp}/report with body {"format":"executive"} (reason: "Executive summary report generation")
+4. Use x402_check_budget to show remaining budget
+
+IMPORTANT: Always use 127.0.0.1 (not localhost). Include all explorer proof links. Say "TRACK 2 COMPLETE" when done.`,
+
+  3: `You are demonstrating AP2 (Agent Payment Protocol) authorization flows for the SF x402 Hackathon.
+
+SCENARIO: An AI agent autonomously subscribes to a premium weather data service using structured AP2 mandates.
+
+Steps:
+1. Use ap2_purchase with description "Premium weather data subscription for fleet management", service_url "http://127.0.0.1:${wp}/weather", merchant_name "WeatherPro Analytics", max_budget "0.005"
+2. Use ap2_get_receipts to show the full mandate chain (intent -> cart -> payment -> receipt)
+
+IMPORTANT: Include all transaction proof links and mandate IDs. Say "TRACK 3 COMPLETE" when done.`,
+
+  4: `You are demonstrating DeFi trading with risk controls for the SF Agentic Commerce Hackathon.
+
+SCENARIO: A portfolio management agent rebalances positions on Algebra DEX (SKALE).
+
+Steps:
+1. Use defi_research to research the USDC token for current market conditions
+2. Use defi_swap to execute a conservative swap: from_token "USDC", to_token "sFUEL", amount "0.001", reasoning "Portfolio diversification into native gas token for operational efficiency"
+3. Use defi_trade_log to show the full trade decision log with risk evaluations
+
+IMPORTANT: Include all transaction proof links and risk scores. Say "TRACK 4 COMPLETE" when done.`,
+
+  5: `You are demonstrating BITE v2 threshold encryption for the SF Agentic Commerce Hackathon.
+
+SCENARIO: An escrow agent encrypts a payment that only unlocks when delivery is confirmed.
+
+Steps:
+1. Use bite_encrypt_payment with to "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD28", data "0x0001", condition_type "delivery_proof", condition_description "Payment unlocks when package delivery is confirmed by GPS oracle"
+2. Use bite_check_and_execute with the payment_id from step 1 to check condition status
+3. Use bite_lifecycle_report with the payment_id to show the full encryption lifecycle
+
+IMPORTANT: Include all transaction proof links and encryption status. Say "TRACK 5 COMPLETE" when done.`,
+
+  6: `You are demonstrating Agentic Vision for the SF Agentic Commerce Hackathon — Gemini 3's visual reasoning combined with autonomous payments.
+
+SCENARIO: A fleet management AI agent receives a dashboard showing 12 vehicles across Nairobi. It must visually analyze the data, identify issues, reason about costs, and autonomously pay for services to resolve them.
+
+Steps:
+1. Use x402_discover_services to find available APIs
+2. Explain your visual analysis: "I see 12 vehicles, 3 alerts: low tire pressure on KBZ-412H, overdue service on KCA-889J, low fuel on KBB-201F. The cost analysis shows KES 12,450 fuel spend today with KES 3,200 potential savings."
+3. Use x402_pay_and_fetch to GET weather from http://127.0.0.1:${wp}/weather?city=Nairobi (reason: "Check weather before rerouting low-fuel vehicle to nearest station")
+4. Use x402_pay_and_fetch to POST route analysis to http://127.0.0.1:${sp}/analyze with body {"text":"Nairobi traffic Westlands route for fleet vehicle KBB-201F fuel stop"} (reason: "Optimize rerouting path for fuel savings")
+5. Use x402_pay_and_fetch to POST alert dispatch to http://127.0.0.1:${rp}/report with body {"format":"fleet_alert","alerts":["Reroute KBB-201F to Shell Westlands","Schedule KCA-889J service"]} (reason: "Dispatch maintenance alerts to fleet manager")
+6. Use x402_check_budget to show total spend and remaining budget
+7. Summarize: "Vision flow: Think (analyze dashboard) -> Observe (3 alerts, cost data) -> Act (3 API calls) -> Pay ($0.003 USDC). ROI: KES 3,200 saved in fuel/maintenance."
+
+IMPORTANT: Always use 127.0.0.1 (not localhost). Frame every action as vision-driven reasoning. Say "TRACK 6 COMPLETE" when done.`,
+  };
+}
+
+// SKALE explorer base for tx hash extraction
+const SKALE_EXPLORER_BASE = "https://base-sepolia-testnet-explorer.skalenodes.com:10032";
+
+/** Extract tx hashes from text and return explorer URLs */
+function extractTxProofButtons(text: string): Array<{ text: string; url: string }> {
+  const buttons: Array<{ text: string; url: string }> = [];
+  const seen = new Set<string>();
+  // Match 0x + 64 hex chars (transaction hashes)
+  const hashRegex = /0x[a-fA-F0-9]{64}/g;
+  let match;
+  while ((match = hashRegex.exec(text)) !== null) {
+    const hash = match[0];
+    if (!seen.has(hash)) {
+      seen.add(hash);
+      buttons.push({
+        text: `View Tx ${hash.slice(0, 8)}...${hash.slice(-4)}`,
+        url: `${SKALE_EXPLORER_BASE}/tx/${hash}`,
+      });
+    }
+  }
+  return buttons.slice(0, 3); // Max 3 buttons
+}
+
+/**
+ * Run demo tracks via the AI agent and report results to Telegram.
+ * Routes demo prompts through agent.chatStream() for real tool usage.
+ */
+async function runAgentDemoInTelegram(
+  ctx: Context,
+  tracks: number[],
+  agentInstance: Agent,
+) {
+  const chatId = ctx.chat!.id;
+  const userId = String(ctx.from?.id || "");
+  const label = tracks.length >= 5 ? "all tracks" : `Track ${tracks.join(", ")}`;
+  const statusMsg = await ctx.reply(`\u26A1 Starting agent-driven demo (${label})...`);
+
+  // Start demo services
+  let servicesStarted = false;
+  try {
+    const { startDemoServices } = await import("../../integrations/agentic-commerce/demo/server.js");
+    await startDemoServices();
+    servicesStarted = true;
+  } catch (err) {
+    await ctx.reply(`\u274C Failed to start demo services: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+
+  // Set chat context for the agent
+  const sendImage = async (imagePath: string, caption?: string) => {
+    const { InputFile } = await import("grammy");
+    const fs = await import("fs");
+    if (fs.existsSync(imagePath)) {
+      await ctx.replyWithPhoto(
+        new InputFile(fs.readFileSync(imagePath), "screenshot.png"),
+        caption ? { caption, parse_mode: "Markdown" } : undefined,
+      );
+    }
+  };
+  agentInstance.setChatContext({ channel: "telegram", peerId: userId, chatId: String(chatId), sendImage });
+
+  const totalStart = Date.now();
+  const allTxButtons: Array<{ text: string; url: string }> = [];
+
+  try {
+    for (const trackNum of tracks) {
+      const prompt = getDemoPrompts()[trackNum];
+      if (!prompt) {
+        await ctx.reply(`\u26A0\uFE0F No agent prompt for Track ${trackNum}, skipping.`);
+        continue;
+      }
+
+      const trackName = DEMO_TRACK_NAMES[trackNum] || `Track ${trackNum}`;
+
+      // Update status
+      await ctx.api.editMessageText(
+        chatId, statusMsg.message_id,
+        `\u26A1 *Track ${trackNum}: ${trackName}*\n_Agent is working..._`,
+        { parse_mode: "Markdown" },
+      ).catch(() => {});
+
+      // Multi-turn agent execution (up to 8 turns per track)
+      const MAX_TURNS = 8;
+      let trackText = "";
+      let trackComplete = false;
+
+      for (let turn = 1; turn <= MAX_TURNS && !trackComplete; turn++) {
+        const turnPrompt = turn === 1
+          ? prompt
+          : "Continue. Complete all remaining steps. Use 127.0.0.1 for service URLs.";
+
+        let turnText = "";
+        const toolsUsed: string[] = [];
+        let lastToolUpdate = 0;
+
+        for await (const event of agentInstance.chatStream(turnPrompt, userId, "telegram", "sub")) {
+          if (event.type === "text") {
+            turnText += event.content;
+          } else if (event.type === "tool_call") {
+            toolsUsed.push(event.content);
+            const now = Date.now();
+            // Throttle tool update messages (every 3 seconds)
+            if (now - lastToolUpdate > 3000) {
+              const emoji = getToolEmoji(event.content);
+              await ctx.api.editMessageText(
+                chatId, statusMsg.message_id,
+                `\u26A1 *Track ${trackNum}: ${trackName}*\n${emoji} _${event.content}_`,
+                { parse_mode: "Markdown" },
+              ).catch(() => {});
+              lastToolUpdate = now;
+            }
+          } else if (event.type === "done") {
+            break;
+          }
+        }
+
+        trackText += turnText;
+
+        // Check for track completion marker
+        if (trackText.toLowerCase().includes(`track ${trackNum} complete`)) {
+          trackComplete = true;
+        }
+      }
+
+      // Extract tx proof buttons from agent response
+      const txButtons = extractTxProofButtons(trackText);
+      allTxButtons.push(...txButtons);
+
+      // Send track result
+      const trackDuration = ((Date.now() - totalStart) / 1000).toFixed(1);
+      const statusIcon = trackComplete ? "\u2705" : "\u26A0\uFE0F";
+
+      // Truncate long responses for Telegram (4000 char limit)
+      let responseText = trackText.trim();
+      if (responseText.length > 3500) {
+        responseText = responseText.slice(0, 3400) + "\n\n_...truncated..._";
+      }
+
+      // Build inline keyboard with tx proof buttons for this track
+      const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
+      if (txButtons.length > 0) {
+        inlineKeyboard.push(txButtons.map(b => ({ text: b.text, url: b.url })));
+      }
+
+      await ctx.reply(
+        `${statusIcon} *Track ${trackNum}: ${trackName}* (${trackDuration}s)\n\n${responseText}`,
+        {
+          parse_mode: "Markdown",
+          ...(inlineKeyboard.length > 0 ? { reply_markup: { inline_keyboard: inlineKeyboard } } : {}),
+        },
+      ).catch(() => {
+        // Fallback without markdown
+        ctx.reply(`${statusIcon} Track ${trackNum}: ${trackName} (${trackDuration}s)\n\n${responseText.replace(/[*_`]/g, "")}`);
+      });
+    }
+
+    // Final summary
+    const totalDuration = ((Date.now() - totalStart) / 1000).toFixed(1);
+    const summaryKeyboard: Array<Array<{ text: string; callback_data?: string; url?: string }>> = [
+      [{ text: "\uD83D\uDD04 Run Again", callback_data: tracks.length >= 5 ? "demo_all" : `demo_track:${tracks[0]}` }],
+    ];
+    // Add unique tx proof buttons to summary (max 3)
+    const uniqueButtons = allTxButtons.slice(0, 3);
+    if (uniqueButtons.length > 0) {
+      summaryKeyboard.push(uniqueButtons.map(b => ({ text: b.text, url: b.url })));
+    }
+
+    await ctx.api.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+    await ctx.reply(
+      `\uD83C\uDFAC *Demo Complete* | ${tracks.length} track(s) | ${totalDuration}s\n\n` +
+      `All transactions settled on SKALE BITE V2 Sandbox (gasless).`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: summaryKeyboard as any },
+      },
+    ).catch(() => {});
+
+  } catch (err) {
+    await ctx.reply(`\u274C Demo error: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    // Always stop demo services
+    if (servicesStarted) {
+      try {
+        const { stopDemoServices } = await import("../../integrations/agentic-commerce/demo/server.js");
+        await stopDemoServices();
+      } catch { /* ignore */ }
+    }
   }
 }
 
@@ -388,7 +736,20 @@ I work autonomously and keep you updated! 🚀`;
       return;
     }
 
-    await ctx.reply(formatStatusForTelegram(state), { parse_mode: "Markdown" });
+    await ctx.reply(formatStatusForTelegram(state), {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "\u23F8 Pause", callback_data: `marathon_pause:${state.id}` },
+            { text: "\uD83D\uDED1 Abort", callback_data: `marathon_abort:${state.id}` },
+          ],
+          [
+            { text: "\uD83D\uDD04 Refresh", callback_data: `marathon_refresh:${state.id}` },
+          ],
+        ],
+      },
+    });
   });
 
   // /pause - Pause active marathon
@@ -957,6 +1318,93 @@ I work autonomously and keep you updated! 🚀`;
       return;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // X402 DEMO CALLBACKS
+    // ═══════════════════════════════════════════════════════════════════════
+    if (data.startsWith("demo_track:")) {
+      const trackNum = parseInt(data.split(":")[1]);
+      await ctx.answerCallbackQuery(`Running Track ${trackNum} via agent...`);
+      await runAgentDemoInTelegram(ctx, [trackNum], agent);
+      return;
+    }
+    if (data === "demo_all") {
+      await ctx.answerCallbackQuery("Running all tracks via agent...");
+      await runAgentDemoInTelegram(ctx, [1, 2, 3, 4, 5, 6], agent);
+      return;
+    }
+    if (data === "demo_preflight") {
+      await ctx.answerCallbackQuery("Running preflight...");
+      try {
+        const { runPreflight } = await import("../../integrations/agentic-commerce/demo/preflight.js");
+        const result = await runPreflight(process.env.AGENT_PRIVATE_KEY);
+        let msg = "\uD83D\uDEEB *Preflight Check*\n\n";
+        msg += `*Mode:* ${result.mode === "live" ? "\u2705 LIVE" : "\u26A0\uFE0F SIMULATION"}\n`;
+        msg += `*Address:* \`${result.address}\`\n`;
+        if (result.mode === "live") {
+          msg += `*sFUEL:* ${result.sFuelBalance}\n*USDC:* $${result.usdcBalance.toFixed(6)}\n`;
+          msg += `*Ready:* ${result.ready ? "\u2705" : "\u274C"}\n`;
+        }
+        for (const w of result.warnings) msg += `\u26A0\uFE0F ${w}\n`;
+        await ctx.reply(msg, { parse_mode: "Markdown" });
+      } catch (err) {
+        await ctx.reply(`\u274C Preflight failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+    if (data === "demo_stop") {
+      await ctx.answerCallbackQuery("Stopping demo services...");
+      try {
+        const { stopDemoServices } = await import("../../integrations/agentic-commerce/demo/server.js");
+        await stopDemoServices();
+        await ctx.reply("\u2705 Demo services stopped.");
+      } catch {
+        await ctx.reply("No demo services running.");
+      }
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MODEL & THINKING CALLBACKS
+    // ═══════════════════════════════════════════════════════════════════════
+    if (data.startsWith("model_set:")) {
+      const alias = data.split(":")[1];
+      await ctx.answerCallbackQuery(`Switching model...`);
+      const MODELS: Record<string, string> = {
+        "pro": "gemini-2.5-pro", "flash": "gemini-2.5-flash",
+        "2": "gemini-2.0-flash", "lite": "gemini-2.0-flash-lite",
+        "1.5-pro": "gemini-1.5-pro", "exp": "gemini-2.0-flash-exp",
+        "3": "gemini-3-pro", "3-flash": "gemini-3-flash",
+      };
+      const modelId = MODELS[alias] || alias;
+      try {
+        const { loadConfig, saveConfig } = await import("../../config/config.js");
+        const config = loadConfig(runtimeDir);
+        config.gemini.models.pro = modelId;
+        saveConfig(runtimeDir, config);
+        agentInstance?.updateConfig(config);
+        await ctx.reply(`\u2705 Switched to: \`${modelId}\``, { parse_mode: "Markdown" });
+      } catch (err) {
+        await ctx.reply(`\u274C ${err instanceof Error ? err.message : "Failed to switch model"}`);
+      }
+      return;
+    }
+    if (data.startsWith("thinking_set:")) {
+      const level = data.split(":")[1];
+      await ctx.answerCallbackQuery(`Thinking: ${level}`);
+      try {
+        const { loadConfig, saveConfig } = await import("../../config/config.js");
+        const config = loadConfig(runtimeDir);
+        if (!config.thinking) config.thinking = { defaultLevel: "medium", costAware: true };
+        config.thinking.defaultLevel = level as any;
+        saveConfig(runtimeDir, config);
+        agentInstance?.updateConfig(config);
+        await ctx.reply(`\u2705 Thinking level: *${level}*`, { parse_mode: "Markdown" });
+      } catch (err) {
+        await ctx.reply(`\u274C ${err instanceof Error ? err.message : "Failed to set thinking level"}`);
+      }
+      return;
+    }
+
     // Let trust handler handle other approve/deny callbacks
     // (it's already registered via initTelegramTrustHandler)
   });
@@ -1055,17 +1503,105 @@ I work autonomously and keep you updated! 🚀`;
       const provider = new ethers.JsonRpcProvider("https://sepolia.base.org");
       const balance = await provider.getBalance(config.wallet.address);
 
+      const { addressLink } = await import("../../wallet/explorer.js");
+      const explorerUrl = addressLink(config.wallet.address);
+
       await ctx.reply(
-        "💰 *Wallet Status*\n\n" +
+        "\uD83D\uDCB0 *Wallet Status*\n\n" +
         `*Address:* \`${config.wallet.address}\`\n` +
         `*Network:* Base Sepolia\n` +
         `*Balance:* ${ethers.formatEther(balance)} ETH\n\n` +
         `_Fund at: faucet.quicknode.com/base/sepolia_`,
-        { parse_mode: "Markdown" }
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "\uD83D\uDD17 View on Explorer", url: explorerUrl }],
+            ],
+          },
+        },
       );
     } catch (err) {
       log.error({ err }, "Wallet check error");
       await ctx.reply("❌ Failed to check wallet: " + (err instanceof Error ? err.message : "Unknown error"));
+    }
+  });
+
+  // ==============================================
+  // FILE ACCESS COMMANDS
+  // ==============================================
+
+  // /files [path] - List files in a directory
+  bot.command("files", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      const { homedir } = await import("os");
+      const { join, basename } = await import("path");
+      const { readdirSync, statSync } = await import("fs");
+
+      const args = (ctx as any).match?.trim() || "";
+      const targetDir = args || join(homedir(), "Downloads");
+
+      const entries = readdirSync(targetDir, { withFileTypes: true })
+        .slice(0, 30)
+        .map((e: any) => {
+          const icon = e.isDirectory() ? "\u{1F4C1}" : "\u{1F4C4}";
+          let size = "";
+          if (!e.isDirectory()) {
+            try {
+              const s = statSync(join(targetDir, e.name)).size;
+              size = s > 1048576
+                ? ` (${(s / 1048576).toFixed(1)}MB)`
+                : s > 1024
+                  ? ` (${(s / 1024).toFixed(0)}KB)`
+                  : ` (${s}B)`;
+            } catch { /* skip */ }
+          }
+          return `${icon} ${e.name}${size}`;
+        })
+        .join("\n");
+
+      const header = `\u{1F4C2} *${basename(targetDir)}*\n_(${targetDir})_\n`;
+      await ctx.reply(header + "\n" + (entries || "_Empty directory_"), { parse_mode: "Markdown" });
+    } catch (err: any) {
+      await ctx.reply("\u274C Could not list directory: " + err.message);
+    }
+  });
+
+  // /send <filepath> - Send a local file to this chat
+  bot.command("send", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const filePath = ((ctx as any).match || "").trim();
+    if (!filePath) {
+      await ctx.reply("Usage: /send <file_path>\nExample: /send C:/Users/You/Downloads/report.pdf");
+      return;
+    }
+
+    const fs = await import("fs");
+    if (!fs.existsSync(filePath)) {
+      await ctx.reply("\u274C File not found: " + filePath);
+      return;
+    }
+
+    try {
+      const chatId = String(ctx.chat?.id || "");
+      const { basename } = await import("path");
+      const sent = await sendTelegramDocument(chatId, filePath, basename(filePath));
+      if (!sent) {
+        await ctx.reply("\u274C Failed to send file. Check the file path and try again.");
+      }
+    } catch (err: any) {
+      await ctx.reply("\u274C Send failed: " + err.message);
     }
   });
 
@@ -1552,6 +2088,687 @@ I work autonomously and keep you updated! 🚀`;
     }
   });
 
+  // ==============================================
+  // x402 / WALLET / COMMERCE COMMANDS
+  // ==============================================
+
+  // /x402demo - Run x402 hackathon demo tracks
+  bot.command("x402demo", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const args = (ctx.message?.text?.split(" ").slice(1) || []).join(" ").trim().toLowerCase();
+
+    // No args - show demo menu with buttons
+    if (!args) {
+      await ctx.reply(
+        "\uD83C\uDFAC *x402 Agentic Commerce Demo*\n\n" +
+        `\u26D3 *Chain:* SKALE BITE V2 Sandbox (gasless)\n` +
+        `\uD83D\uDCBC *Wallet:* ${process.env.AGENT_PRIVATE_KEY ? "Connected" : "Simulation mode"}\n\n` +
+        "Select a track to run:",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "1\uFE0F\u20E3 Overall Best", callback_data: "demo_track:1" },
+                { text: "2\uFE0F\u20E3 x402 Payments", callback_data: "demo_track:2" },
+              ],
+              [
+                { text: "3\uFE0F\u20E3 AP2 Auth", callback_data: "demo_track:3" },
+                { text: "4\uFE0F\u20E3 DeFi Agent", callback_data: "demo_track:4" },
+              ],
+              [
+                { text: "5\uFE0F\u20E3 BITE Encrypted", callback_data: "demo_track:5" },
+                { text: "\uD83D\uDC41 Vision", callback_data: "demo_track:6" },
+              ],
+              [
+                { text: "\uD83D\uDE80 Run All 6 Tracks", callback_data: "demo_all" },
+              ],
+              [
+                { text: "\u2705 Preflight Check", callback_data: "demo_preflight" },
+                { text: "\u23F9 Stop Services", callback_data: "demo_stop" },
+              ],
+            ],
+          },
+        },
+      );
+      return;
+    }
+
+    // Preflight
+    if (args === "preflight" || args === "check") {
+      await ctx.reply("\u2705 Running preflight check...");
+      try {
+        const { runPreflight } = await import("../../integrations/agentic-commerce/demo/preflight.js");
+        const result = await runPreflight(process.env.AGENT_PRIVATE_KEY);
+        let msg = "\uD83D\uDEEB *x402 Demo Preflight*\n\n";
+        msg += `*Mode:* ${result.mode === "live" ? "\u2705 LIVE" : "\u26A0\uFE0F SIMULATION"}\n`;
+        msg += `*Address:* \`${result.address}\`\n`;
+        if (result.mode === "live") {
+          msg += `*sFUEL:* ${result.sFuelBalance}\n`;
+          msg += `*USDC:* $${result.usdcBalance.toFixed(6)}\n`;
+          msg += `*Ready:* ${result.ready ? "\u2705 YES" : "\u274C NO"}\n`;
+        }
+        for (const w of result.warnings) {
+          msg += `\u26A0\uFE0F ${w}\n`;
+        }
+        await ctx.reply(msg, { parse_mode: "Markdown" });
+      } catch (err) {
+        await ctx.reply(`\u274C Preflight failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    // Stop
+    if (args === "stop" || args === "kill") {
+      try {
+        const { stopDemoServices } = await import("../../integrations/agentic-commerce/demo/server.js");
+        await stopDemoServices();
+        await ctx.reply("\u2705 Demo services stopped.");
+      } catch {
+        await ctx.reply("No demo services running.");
+      }
+      return;
+    }
+
+    // Run all
+    if (args === "all") {
+      await runAgentDemoInTelegram(ctx, [1, 2, 3, 4, 5, 6], agent);
+      return;
+    }
+
+    // Single track
+    const trackNum = /^[1-6]$/.test(args) ? parseInt(args) : 0;
+    if (trackNum >= 1 && trackNum <= 6) {
+      await runAgentDemoInTelegram(ctx, [trackNum], agent);
+      return;
+    }
+
+    await ctx.reply("Usage: /x402demo [1-6|all|preflight|stop]");
+  });
+
+  // /x402scan - Scan wallet transactions
+  bot.command("x402scan", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      const { getWalletAddress } = await import("../../wallet/x402.js");
+      const addr = getWalletAddress(runtimeDir);
+      if (!addr) {
+        await ctx.reply("\u274C Wallet not initialized. Run /wallet first.");
+        return;
+      }
+
+      const args = (ctx.message?.text?.split(" ").slice(1) || []).join(" ").trim().toLowerCase();
+      const { X402Scanner, formatScanSummary, formatVerification } = await import("../../wallet/x402-scan.js");
+      const scanner = new X402Scanner(runtimeDir);
+
+      if (args.startsWith("verify ")) {
+        const txHash = args.split(" ")[1];
+        await ctx.reply("\uD83D\uDD0D Verifying transaction...");
+        const verification = await scanner.verifyTransaction(txHash);
+        const text = formatVerification(verification).replace(/\x1B\[[0-9;]*m/g, ""); // strip ANSI
+        await ctx.reply(`\uD83D\uDD0D *Transaction Verification*\n\n\`\`\`\n${text.slice(0, 3800)}\n\`\`\``, { parse_mode: "Markdown" }).catch(() => ctx.reply(text.slice(0, 4000)));
+      } else if (args === "history") {
+        await ctx.reply("\uD83D\uDCDC Fetching transaction history...");
+        const txs = await scanner.getUSDCTransfers(addr, { pageSize: 20 });
+        if (txs.length === 0) {
+          await ctx.reply("No transactions found.");
+          return;
+        }
+        let msg = "\uD83D\uDCDC *Transaction History*\n\n";
+        for (const tx of txs.slice(0, 15)) {
+          const dir = tx.direction === "out" ? "\uD83D\uDD34 -" : "\uD83D\uDFE2 +";
+          const peer = tx.direction === "out" ? `${tx.to.slice(0, 6)}...${tx.to.slice(-4)}` : `${tx.from.slice(0, 6)}...${tx.from.slice(-4)}`;
+          msg += `${dir}$${parseFloat(tx.value).toFixed(4)} ${peer} \`${tx.hash.slice(0, 10)}\`\n`;
+        }
+        await ctx.reply(msg, { parse_mode: "Markdown" }).catch(() => ctx.reply(msg.replace(/[*`]/g, "")));
+      } else if (args === "reconcile") {
+        await ctx.reply("\uD83D\uDD04 Reconciling on-chain vs local...");
+        const result = await scanner.reconcile(addr);
+        await ctx.reply(
+          `\uD83D\uDD04 *Reconciliation*\n\n` +
+          `Matched: ${result.matched}\n` +
+          `On-chain only: ${result.onChainOnly.length}\n` +
+          `Local only: ${result.localOnly.length}`,
+          { parse_mode: "Markdown" },
+        );
+      } else {
+        await ctx.reply("\uD83D\uDD0D Scanning wallet on SKALE...");
+        const summary = await scanner.scanWallet(addr);
+        const text = formatScanSummary(summary).replace(/\x1B\[[0-9;]*m/g, "");
+        await ctx.reply(`\uD83D\uDD0D *Wallet Scan*\n\n\`\`\`\n${text.slice(0, 3800)}\n\`\`\``, { parse_mode: "Markdown" }).catch(() => ctx.reply(text.slice(0, 4000)));
+      }
+    } catch (err) {
+      await ctx.reply(`\u274C Scan failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+
+  // /commerce - Agentic commerce status
+  bot.command("commerce", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const registry = agent.getIntegrationRegistry();
+    if (!registry) {
+      await ctx.reply("No integrations loaded.");
+      return;
+    }
+
+    const commerce = registry.get("agentic-commerce");
+    if (!commerce) {
+      await ctx.reply("\u274C Agentic commerce not registered.\n\nSet AGENT\\_PRIVATE\\_KEY in .env to enable.");
+      return;
+    }
+
+    let msg = "\uD83D\uDED2 *Agentic Commerce (x402)*\n\n";
+    msg += `*Status:* ${commerce.status === "active" ? "\u2705 Active" : commerce.status === "error" ? "\u274C Error" : "\u26A0\uFE0F " + commerce.status}\n`;
+
+    if (commerce.error) msg += `*Error:* ${commerce.error}\n`;
+
+    if (commerce.enabled) {
+      const health = await commerce.instance.healthCheck();
+      msg += `*Wallet:* ${health.message || "Unknown"}\n`;
+      msg += `*Tools:* ${commerce.manifest.tools.length} available\n\n`;
+      msg += "*Available tools:*\n";
+      for (const tool of commerce.manifest.tools) {
+        msg += `\u2022 \`${tool.name}\`\n`;
+      }
+    } else {
+      msg += "\nTo enable, set AGENT\\_PRIVATE\\_KEY in .env";
+    }
+
+    const { getAllChannels } = await import("../../channels/dock.js");
+    const channels = getAllChannels();
+    if (channels.length > 0) {
+      msg += "\n*Connected Channels:*\n";
+      for (const ch of channels) {
+        const icon = ch.status === "connected" ? "\u2705" : "\u274C";
+        msg += `${icon} ${ch.name} (${ch.type})\n`;
+      }
+    }
+
+    await ctx.reply(msg, { parse_mode: "Markdown" }).catch(() => ctx.reply(msg.replace(/[*`]/g, "")));
+  });
+
+  // ==============================================
+  // AI & MODEL COMMANDS
+  // ==============================================
+
+  // /model - Switch AI model
+  bot.command("model", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const args = (ctx.message?.text?.split(" ").slice(1) || []).join(" ").trim().toLowerCase();
+    const { loadConfig, saveConfig } = await import("../../config/config.js");
+    const config = loadConfig(runtimeDir);
+
+    if (!args) {
+      await ctx.reply(
+        "\uD83E\uDDE0 *Switch Model*\n\n" +
+        `Current: \`${config.gemini.models.pro}\`\n\n` +
+        "Select a model:",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "\uD83D\uDE80 Gemini 2.5 Pro", callback_data: "model_set:pro" },
+                { text: "\u26A1 Gemini 2.5 Flash", callback_data: "model_set:flash" },
+              ],
+              [
+                { text: "\uD83D\uDCA1 Gemini 2.0 Flash", callback_data: "model_set:2" },
+                { text: "\uD83C\uDF1F Gemini 2.0 Lite", callback_data: "model_set:lite" },
+              ],
+              [
+                { text: "\uD83D\uDD2C Gemini 1.5 Pro", callback_data: "model_set:1.5-pro" },
+                { text: "\uD83E\uDDEA Experimental", callback_data: "model_set:exp" },
+              ],
+            ],
+          },
+        },
+      );
+      return;
+    }
+
+    // Direct model switch
+    const MODELS: Record<string, string> = {
+      "pro": "gemini-2.5-pro", "flash": "gemini-2.5-flash",
+      "2": "gemini-2.0-flash", "lite": "gemini-2.0-flash-lite",
+      "1.5-pro": "gemini-1.5-pro", "1.5-flash": "gemini-1.5-flash",
+      "exp": "gemini-2.0-flash-exp", "nano": "gemini-nano",
+      "3": "gemini-3-pro", "3-flash": "gemini-3-flash",
+    };
+    const modelId = MODELS[args] || args;
+    config.gemini.models.pro = modelId;
+    saveConfig(runtimeDir, config);
+    agent.updateConfig(config);
+    await ctx.reply(`\u2705 Switched to: \`${modelId}\``, { parse_mode: "Markdown" });
+  });
+
+  // /thinking - Set thinking level
+  bot.command("thinking", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const args = (ctx.message?.text?.split(" ").slice(1) || []).join(" ").trim().toLowerCase();
+
+    if (!args) {
+      await ctx.reply(
+        "\uD83E\uDDE0 *Thinking Level*\n\nSelect depth:",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "\u26A1 None (fastest)", callback_data: "thinking_set:none" },
+                { text: "\uD83D\uDCA1 Low", callback_data: "thinking_set:low" },
+              ],
+              [
+                { text: "\uD83E\uDDE0 Medium", callback_data: "thinking_set:medium" },
+                { text: "\uD83D\uDD2C High", callback_data: "thinking_set:high" },
+              ],
+              [
+                { text: "\uD83C\uDF1F Ultra (deepest)", callback_data: "thinking_set:ultra" },
+              ],
+            ],
+          },
+        },
+      );
+      return;
+    }
+
+    const valid = ["none", "low", "medium", "high", "ultra"];
+    if (!valid.includes(args)) {
+      await ctx.reply("Usage: /thinking [none|low|medium|high|ultra]");
+      return;
+    }
+
+    const { loadConfig, saveConfig } = await import("../../config/config.js");
+    const config = loadConfig(runtimeDir);
+    if (!config.thinking) config.thinking = { defaultLevel: "medium", costAware: true };
+    config.thinking.defaultLevel = args as any;
+    saveConfig(runtimeDir, config);
+    agent.updateConfig(config);
+    await ctx.reply(`\u2705 Thinking level: *${args}*`, { parse_mode: "Markdown" });
+  });
+
+  // ==============================================
+  // STATUS & ANALYTICS COMMANDS
+  // ==============================================
+
+  // /help - Show all available commands
+  bot.command("help", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    await ctx.reply(
+      "\uD83D\uDC7B *Wispy Commands*\n\n" +
+      "*Core*\n" +
+      "/help \u2014 Show this help\n" +
+      "/status \u2014 Marathon progress\n" +
+      "/clear \u2014 Clear conversation\n\n" +
+      "*Marathon*\n" +
+      "/marathon \u2014 Start autonomous task\n" +
+      "/pause /resume /abort \u2014 Control marathon\n" +
+      "/approvals \u2014 Pending approvals\n" +
+      "/list \u2014 List marathons\n\n" +
+      "*AI & Models*\n" +
+      "/model \u2014 Switch AI model\n" +
+      "/thinking \u2014 Set thinking depth\n\n" +
+      "*Wallet & x402*\n" +
+      "/wallet \u2014 Check wallet status\n" +
+      "/x402demo \u2014 Run demo tracks\n" +
+      "/x402scan \u2014 Scan transactions\n" +
+      "/commerce \u2014 Commerce status\n\n" +
+      "*Dev Workflow*\n" +
+      "/deploy \u2014 Deploy to Vercel\n" +
+      "/push \u2014 Push to GitHub\n" +
+      "/git \u2014 Git operations\n" +
+      "/npm \u2014 Run npm scripts\n" +
+      "/debug \u2014 Debug tools\n\n" +
+      "*Analytics*\n" +
+      "/tokens \u2014 Token usage\n" +
+      "/cost \u2014 Cost breakdown\n" +
+      "/context \u2014 Context window\n\n" +
+      "*Files*\n" +
+      "/files \u2014 List files in directory\n" +
+      "/send \u2014 Send a local file\n\n" +
+      "*Utilities*\n" +
+      "/image \u2014 Generate image\n" +
+      "/voice \u2014 Toggle voice replies\n" +
+      "/channels \u2014 Connected channels\n" +
+      "/tools \u2014 Available tools\n" +
+      "/skills \u2014 Loaded skills\n" +
+      "/export \u2014 Export conversation\n" +
+      "/session \u2014 Switch session\n" +
+      "/compact \u2014 Compact context\n" +
+      "/integrations \u2014 List integrations\n\n" +
+      "_Type naturally to chat. Send voice messages for voice input._",
+      { parse_mode: "Markdown" },
+    );
+  });
+
+  // /tokens - Token usage stats
+  bot.command("tokens", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      const { TokenManager } = await import("../../token/estimator.js");
+      const tokenManager = new TokenManager();
+      const stats = tokenManager.getStats();
+      await ctx.reply(
+        "\uD83D\uDCCA *Token Usage*\n\n" +
+        `*Session:* ${stats.sessionTokens.toLocaleString()} tokens ($${stats.sessionCost.toFixed(4)})\n` +
+        `*Today:* ${stats.dailyTokens.toLocaleString()} tokens ($${stats.dailyCost.toFixed(4)})\n` +
+        `*Requests:* ${stats.requestCount}\n` +
+        `*Budget:* ${stats.budget.maxTokensPerDay.toLocaleString()} tokens/day`,
+        { parse_mode: "Markdown" },
+      );
+    } catch (err) {
+      await ctx.reply(`\u274C ${err instanceof Error ? err.message : "Failed to get token stats"}`);
+    }
+  });
+
+  // /cost - Cost breakdown
+  bot.command("cost", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      const { TokenManager } = await import("../../token/estimator.js");
+      const tokenManager = new TokenManager();
+      const stats = tokenManager.getStats();
+      const inputCost = stats.sessionCost * 0.3;
+      const outputCost = stats.sessionCost * 0.7;
+      const projected = stats.dailyCost * 30;
+      await ctx.reply(
+        "\uD83D\uDCB0 *Cost Breakdown*\n\n" +
+        `*Session input:* $${inputCost.toFixed(4)}\n` +
+        `*Session output:* $${outputCost.toFixed(4)}\n` +
+        `*Session total:* $${stats.sessionCost.toFixed(4)}\n` +
+        `*Today total:* $${stats.dailyCost.toFixed(4)}\n` +
+        `*Projected/month:* $${projected.toFixed(2)}\n` +
+        `*Requests:* ${stats.requestCount}`,
+        { parse_mode: "Markdown" },
+      );
+    } catch (err) {
+      await ctx.reply(`\u274C ${err instanceof Error ? err.message : "Failed to get cost stats"}`);
+    }
+  });
+
+  // /context - Context window usage
+  bot.command("context", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      const { TokenManager } = await import("../../token/estimator.js");
+      const tokenManager = new TokenManager();
+      const stats = tokenManager.getStats();
+      const pct = Math.round((stats.sessionTokens / stats.budget.maxTokensPerSession) * 100);
+      const dailyPct = Math.round((stats.dailyTokens / stats.budget.maxTokensPerDay) * 100);
+      const bar = (p: number) => {
+        const filled = Math.round((p / 100) * 20);
+        return "\u2588".repeat(filled) + "\u2591".repeat(20 - filled) + ` ${p}%`;
+      };
+      await ctx.reply(
+        "\uD83D\uDCCA *Context Window*\n\n" +
+        `*Session:*\n\`${bar(pct)}\`\n${stats.sessionTokens.toLocaleString()} / ${stats.budget.maxTokensPerSession.toLocaleString()} tokens\n\n` +
+        `*Daily:*\n\`${bar(dailyPct)}\`\n${stats.dailyTokens.toLocaleString()} / ${stats.budget.maxTokensPerDay.toLocaleString()} tokens`,
+        { parse_mode: "Markdown" },
+      );
+    } catch (err) {
+      await ctx.reply(`\u274C ${err instanceof Error ? err.message : "Failed to get context stats"}`);
+    }
+  });
+
+  // /channels - Show connected channels
+  bot.command("channels", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const { getAllChannels } = await import("../../channels/dock.js");
+    const channels = getAllChannels();
+
+    if (channels.length === 0) {
+      await ctx.reply("No channels connected.");
+      return;
+    }
+
+    let msg = "\uD83D\uDD0C *Connected Channels*\n\n";
+    for (const ch of channels) {
+      const icon = ch.status === "connected" ? "\u2705" : ch.status === "error" ? "\u274C" : "\u26A0\uFE0F";
+      const caps = Object.entries(ch.capabilities).filter(([, v]) => v).map(([k]) => k).join(", ");
+      msg += `${icon} *${ch.name}* (${ch.type})\n`;
+      msg += `   _${caps}_\n`;
+      if (ch.connectedAt) msg += `   Connected: ${ch.connectedAt}\n`;
+      if (ch.error) msg += `   Error: ${ch.error}\n`;
+      msg += "\n";
+    }
+
+    await ctx.reply(msg, { parse_mode: "Markdown" }).catch(() => ctx.reply(msg.replace(/[*_`]/g, "")));
+  });
+
+  // /tools - List available tools
+  bot.command("tools", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const { BUILT_IN_TOOLS } = await import("../../ai/tools.js");
+    const toolNames = BUILT_IN_TOOLS.map(t => t.name);
+
+    // Also include integration tools if available
+    const registry = agent.getIntegrationRegistry();
+    if (registry) {
+      for (const s of registry.getStatus()) {
+        if (s.status === "active") {
+          const entry = registry.get(s.id);
+          if (entry?.manifest?.tools) {
+            for (const t of entry.manifest.tools) {
+              if (!toolNames.includes(t.name)) toolNames.push(t.name);
+            }
+          }
+        }
+      }
+    }
+
+    let msg = "\uD83D\uDD27 *Available Tools*\n\n";
+    for (const name of toolNames) {
+      msg += `\u2022 \`${name}\`\n`;
+    }
+    msg += `\n_${toolNames.length} tools loaded_`;
+
+    await ctx.reply(msg, { parse_mode: "Markdown" }).catch(() => ctx.reply(msg.replace(/[*`_]/g, "")));
+  });
+
+  // /skills - List loaded skills
+  bot.command("skills", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      const { loadSkills } = await import("../../skills/loader.js");
+      const { join } = await import("path");
+      const soulDir = join(runtimeDir, "..", "wispy");
+      const skills = loadSkills(soulDir);
+      if (skills.length === 0) {
+        await ctx.reply("No custom skills loaded.\n\nAdd .md files to your wispy/SKILLS/ directory.");
+        return;
+      }
+
+      let msg = "\uD83C\uDFAF *Loaded Skills*\n\n";
+      for (const skill of skills) {
+        msg += `\u2022 *${(skill as any).name || "unnamed"}*\n`;
+      }
+      msg += `\n_${skills.length} skills loaded_`;
+
+      await ctx.reply(msg, { parse_mode: "Markdown" }).catch(() => ctx.reply(msg.replace(/[*_]/g, "")));
+    } catch {
+      await ctx.reply("No skills loaded.");
+    }
+  });
+
+  // /integrations - List integrations
+  bot.command("integrations", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const registry = agent.getIntegrationRegistry();
+    if (!registry) {
+      await ctx.reply("No integrations loaded.");
+      return;
+    }
+
+    const status = registry.getStatus();
+    let msg = `\uD83D\uDD0C *${status.length} Integration(s)*\n\n`;
+    for (const s of status) {
+      const icon = s.status === "active" ? "\u2705" : s.status === "error" ? "\u274C" : "\u26A0\uFE0F";
+      msg += `${icon} *${s.id}* \u2014 ${s.name} [${s.category}]\n`;
+    }
+
+    await ctx.reply(msg, { parse_mode: "Markdown" }).catch(() => ctx.reply(msg.replace(/[*]/g, "")));
+  });
+
+  // /session - Switch or show session
+  bot.command("session", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const args = (ctx.message?.text?.split(" ").slice(1) || []).join(" ").trim();
+    if (args) {
+      await ctx.reply(`\u2705 Switched to session: \`${args}\`\n\n_Note: session isolation is per-user in Telegram._`, { parse_mode: "Markdown" });
+    } else {
+      await ctx.reply("Usage: /session <name>\n\nSwitch to a named conversation session.");
+    }
+  });
+
+  // /compact - Compact context
+  bot.command("compact", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      // Trigger compaction by sending a compact request through the agent
+      const result = await agent.chat(
+        "[System: compact context window, summarize older messages to save tokens]",
+        userId, "telegram", "main",
+      );
+      await ctx.reply("\u2705 Context compacted.\n\n" + (result.text || "Older messages summarized to save tokens."));
+    } catch (err) {
+      await ctx.reply(`\u274C Compact failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+
+  // /export - Export conversation
+  bot.command("export", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      const { loadConfig } = await import("../../config/config.js");
+      const { loadHistory } = await import("../../core/session.js");
+      const { writeFileSync } = await import("fs");
+      const { join } = await import("path");
+      const config = loadConfig(runtimeDir);
+      const { buildSessionKey } = await import("../../security/isolation.js");
+      const sessionKey = buildSessionKey(config.agent.id, "main", userId);
+      const history = loadHistory(runtimeDir, config.agent.id, sessionKey);
+      const md = history.map((m) => `**${m.role}**: ${m.content}`).join("\n\n");
+      const outPath = join(runtimeDir, "cli", `export-telegram-${Date.now()}.md`);
+      writeFileSync(outPath, md, "utf8");
+      await ctx.reply(`\u2705 Exported ${history.length} messages to:\n\`${outPath}\``, { parse_mode: "Markdown" });
+    } catch (err) {
+      await ctx.reply(`\u274C Export failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+
+  // /stats - System status summary
+  bot.command("stats", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      const { loadConfig } = await import("../../config/config.js");
+      const config = loadConfig(runtimeDir);
+      const os = await import("os");
+      const { getWalletAddress } = await import("../../wallet/x402.js");
+      const { getAllChannels } = await import("../../channels/dock.js");
+
+      const walletAddr = getWalletAddress(runtimeDir);
+      const channels = getAllChannels();
+
+      let msg = "\uD83D\uDCCA *System Status*\n\n";
+      msg += `*Agent:* ${config.agent.name}\n`;
+      msg += `*Model:* \`${config.gemini.models.pro}\`\n`;
+      msg += `*Mode:* ${agent.getMode() === "plan" ? "\uD83D\uDCCB Plan" : "\u26A1 Execute"}\n`;
+      msg += `*Platform:* ${os.type()} ${os.arch()}\n`;
+      msg += `*Uptime:* ${Math.floor(process.uptime() / 60)} min\n`;
+      msg += `*Memory:* ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB\n`;
+      msg += `*Wallet:* ${walletAddr ? walletAddr.slice(0, 10) + "..." : "not initialized"}\n`;
+      msg += `*Channels:* ${channels.map(c => c.name).join(", ") || "none"}\n`;
+
+      await ctx.reply(msg, { parse_mode: "Markdown" });
+    } catch (err) {
+      await ctx.reply(`\u274C ${err instanceof Error ? err.message : "Failed to get stats"}`);
+    }
+  });
+
   // Voice message handling - Transcribe and process
   bot.on("message:voice", async (ctx: Context) => {
     const userId = String(ctx.from?.id || "");
@@ -1610,8 +2827,26 @@ I work autonomously and keep you updated! 🚀`;
         return;
       }
 
+      // Broadcast transcribed voice to CLI channel for cross-channel sync
+      broadcastChannelEvent({
+        type: "message",
+        source: "telegram",
+        data: { text: transcription, userId, isVoice: true },
+        timestamp: new Date().toISOString(),
+      });
+
       // Now process the transcribed text through the agent
       const result = await agent.chat(transcription, userId, "telegram", "main");
+
+      // Broadcast agent response to CLI
+      if (result.text) {
+        broadcastChannelEvent({
+          type: "notification",
+          source: "telegram",
+          data: { text: result.text, isResponse: true },
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       // Send response with transcription context
       const responseText = result.text || "...";
@@ -2127,8 +3362,54 @@ I work autonomously and keep you updated! 🚀`;
 
   // Start the bot
   bot.start({
-    onStart: () => {
+    onStart: async () => {
       log.info("Telegram bot started with Marathon support");
+
+      // Register command menu with Telegram
+      await bot.api.setMyCommands([
+        // Core
+        { command: "start", description: "Welcome & pair with Wispy" },
+        { command: "help", description: "Show all commands" },
+        { command: "clear", description: "Clear conversation" },
+        { command: "stats", description: "System status" },
+        // Marathon
+        { command: "marathon", description: "Start autonomous marathon" },
+        { command: "status", description: "Check marathon progress" },
+        { command: "pause", description: "Pause active marathon" },
+        { command: "resume", description: "Resume paused marathon" },
+        { command: "abort", description: "Stop current marathon" },
+        { command: "approvals", description: "List pending approvals" },
+        { command: "list", description: "List all marathons" },
+        // AI & Models
+        { command: "model", description: "Switch AI model" },
+        { command: "thinking", description: "Set thinking depth" },
+        // Wallet & x402
+        { command: "wallet", description: "Check crypto wallet" },
+        { command: "x402demo", description: "Run x402 demo tracks" },
+        { command: "x402scan", description: "Scan wallet transactions" },
+        { command: "commerce", description: "Commerce integration status" },
+        // Dev Workflow
+        { command: "deploy", description: "Deploy to Vercel" },
+        { command: "push", description: "Push to GitHub" },
+        { command: "git", description: "Git operations" },
+        { command: "npm", description: "Run npm scripts" },
+        { command: "debug", description: "Debug tools" },
+        // Analytics
+        { command: "tokens", description: "Token usage stats" },
+        { command: "cost", description: "Cost breakdown" },
+        { command: "context", description: "Context window usage" },
+        // Utilities
+        { command: "image", description: "Generate AI image" },
+        { command: "voice", description: "Toggle voice replies" },
+        { command: "channels", description: "Connected channels" },
+        { command: "tools", description: "List available tools" },
+        { command: "skills", description: "List loaded skills" },
+        { command: "integrations", description: "List integrations" },
+        { command: "export", description: "Export conversation" },
+        { command: "session", description: "Switch session" },
+        { command: "compact", description: "Compact context window" },
+      ]).catch((err) => log.warn("Failed to set commands menu: %s", err));
+
       registerChannel({
         name: "telegram",
         type: "telegram",
@@ -2144,12 +3425,27 @@ I work autonomously and keep you updated! 🚀`;
         status: "connected",
         connectedAt: new Date().toISOString(),
       });
+
+      // Register cross-channel dispatcher so CLI can send to Telegram
+      registerChannelDispatcher("telegram", {
+        sendMessage: sendTelegramMessage,
+        sendImage: sendTelegramImage,
+        sendDocument: sendTelegramDocument,
+      });
     },
   });
 
   bot.catch((err) => {
+    const msg = String(err);
+    // 409 Conflict = another bot instance took over this token (multi-instance)
+    if (msg.includes("409") || msg.includes("Conflict") || msg.includes("terminated by other")) {
+      log.warn("Telegram bot displaced by another instance, stopping gracefully");
+      updateChannelStatus("telegram", "disconnected", "displaced by another instance");
+      bot.stop().catch(() => {});
+      return;
+    }
     log.error({ err }, "Telegram bot error");
-    updateChannelStatus("telegram", "error", String(err));
+    updateChannelStatus("telegram", "error", msg);
   });
 
   return bot;

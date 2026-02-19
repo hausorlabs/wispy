@@ -35,7 +35,7 @@ const commands: SlashCommand[] = [
         "Marathon": ["marathon"],
         "System": ["config", "security", "logs", "tokens", "cost", "context", "stats", "doctor", "onboard"],
         "Utilities": ["export", "copy", "theme", "verbose", "checkpoints", "rewind"],
-        "Advanced": ["wallet", "x402scan", "peers", "cron", "agents", "plugins", "integrations", "browser", "voice"],
+        "Advanced": ["wallet", "x402scan", "x402demo", "commerce", "peers", "cron", "agents", "plugins", "integrations", "browser", "voice"],
       };
 
       console.log(chalk.bold.cyan("\n  Wispy Commands\n"));
@@ -362,10 +362,10 @@ const commands: SlashCommand[] = [
   },
   {
     name: "wallet",
-    description: "Wallet management [export|import|commerce|fund]",
+    description: "Wallet management [balance|details|export|import|recovery|recover|commerce|fund]",
     handler: async (args, ctx) => {
       const chalk = (await import("chalk")).default;
-      const { getWalletAddress, getBalance, exportWalletPrivateKey, importWalletFromKey } = await import("../wallet/x402.js");
+      const { getWalletAddress, getBalance, exportWalletPrivateKey, importWalletFromKey, exportWalletMnemonic, recoverWalletFromMnemonic } = await import("../wallet/x402.js");
       const { getCommerceEngine } = await import("../wallet/commerce.js");
       const { loadOrCreateIdentity } = await import("../security/device-identity.js");
 
@@ -410,6 +410,59 @@ const commands: SlashCommand[] = [
           console.log(`  Chain:   ${info.chain}\n`);
         } catch (err: any) {
           console.log(chalk.red(`\n  Import failed: ${err.message}\n`));
+        }
+        return;
+      }
+
+      // /wallet recovery — show 12-word recovery phrase
+      if (subcommand === "recovery") {
+        const addr = getWalletAddress(ctx.runtimeDir);
+        if (!addr) { console.log(t.dim("\nWallet not initialized.\n")); return; }
+
+        console.log(chalk.bold.yellow("\n  WARNING: Your recovery phrase will be displayed."));
+        console.log(chalk.yellow("  Anyone with these 12 words can steal your funds."));
+        console.log(chalk.yellow("  Never share them. Never type them online.\n"));
+
+        const identity = loadOrCreateIdentity(ctx.runtimeDir);
+        const mnemonic = exportWalletMnemonic(ctx.runtimeDir, identity);
+
+        if (!mnemonic) {
+          console.log(chalk.dim("  No recovery phrase stored for this wallet."));
+          console.log(chalk.dim("  (Wallets imported from a private key don't have one.)\n"));
+          return;
+        }
+
+        console.log(chalk.bold("  Wallet:  ") + addr);
+        console.log(chalk.bold("  Phrase:  ") + chalk.dim("(12 words)\n"));
+        const words = mnemonic.split(" ");
+        for (let i = 0; i < words.length; i += 3) {
+          const row = words.slice(i, i + 3).map((w, j) => {
+            const num = String(i + j + 1).padStart(2, " ");
+            return chalk.dim(`${num}.`) + ` ${chalk.bold(w.padEnd(10))}`;
+          }).join("  ");
+          console.log(`    ${row}`);
+        }
+        console.log();
+        return;
+      }
+
+      // /wallet recover <12 words> — recover wallet from mnemonic
+      if (subcommand === "recover") {
+        const phrase = parts.slice(1).join(" ").trim();
+        if (!phrase || phrase.split(/\s+/).length < 12) {
+          console.log(chalk.red("\n  Usage: /wallet recover word1 word2 word3 ... word12\n"));
+          console.log(chalk.dim("  Enter all 12 words of your recovery phrase separated by spaces.\n"));
+          return;
+        }
+
+        try {
+          const identity = loadOrCreateIdentity(ctx.runtimeDir);
+          const info = recoverWalletFromMnemonic(ctx.runtimeDir, identity, phrase);
+          console.log(chalk.green(`\n  Wallet recovered successfully!`));
+          console.log(`  Address: ${chalk.cyan(info.address)}`);
+          console.log(`  Chain:   ${info.chain}\n`);
+        } catch (err: any) {
+          console.log(chalk.red(`\n  Recovery failed: ${err.message}\n`));
         }
         return;
       }
@@ -478,6 +531,103 @@ const commands: SlashCommand[] = [
         return;
       }
 
+      // /wallet balance — detailed per-chain balances
+      if (subcommand === "balance") {
+        const addr = getWalletAddress(ctx.runtimeDir);
+        if (!addr) { console.log(t.dim("\nWallet not initialized.\n")); return; }
+
+        console.log(chalk.bold("\n  Wallet Balances\n"));
+        console.log(`  ${chalk.cyan("Base Mainnet")}`);
+        console.log(`  Address: ${addr}`);
+        try {
+          const bal = await getBalance(ctx.runtimeDir);
+          console.log(`  USDC:    ${bal}`);
+        } catch {
+          console.log(`  USDC:    ${t.dim("unavailable")}`);
+        }
+
+        // SKALE balance
+        const skaleKey = process.env.AGENT_PRIVATE_KEY;
+        if (skaleKey) {
+          console.log(`\n  ${chalk.cyan("SKALE")} ${chalk.dim("(gasless)")}`);
+          console.log(`  Key:     ${chalk.green("Set")}`);
+        }
+
+        // Solana balance
+        try {
+          const { getSolanaWalletAddress, getSolanaBalance: getSolBal } = await import("../wallet/solana.js");
+          const solAddr = getSolanaWalletAddress(ctx.runtimeDir);
+          if (solAddr) {
+            console.log(`\n  ${chalk.cyan("Solana")}`);
+            console.log(`  Address: ${solAddr}`);
+            try {
+              const solBal = await getSolBal(ctx.runtimeDir);
+              console.log(`  SOL:     ${solBal}`);
+            } catch {
+              console.log(`  SOL:     ${t.dim("unavailable")}`);
+            }
+          }
+        } catch {
+          // Solana module not available
+        }
+
+        // Commerce spending summary
+        const commerce = getCommerceEngine();
+        if (commerce) {
+          const spending = commerce.getDailySpending();
+          console.log(`\n  ${chalk.cyan("Today's Spending")}`);
+          console.log(`  Total:     $${spending.total.toFixed(2)}`);
+          console.log(`  Remaining: ${chalk.green("$" + spending.remaining.toFixed(2))}`);
+        }
+
+        console.log();
+        return;
+      }
+
+      // /wallet details — full wallet info dump
+      if (subcommand === "details") {
+        const addr = getWalletAddress(ctx.runtimeDir);
+        if (!addr) { console.log(t.dim("\nWallet not initialized.\n")); return; }
+
+        console.log(chalk.bold("\n  Wallet Details\n"));
+        console.log(`  Address:       ${addr}`);
+        console.log(`  Network:       Base (Chain ID 8453)`);
+        console.log(`  Wallet File:   ${t.dim(ctx.runtimeDir + "/wallet/wallet.json")}`);
+        console.log(`  SKALE Key:     ${process.env.AGENT_PRIVATE_KEY ? chalk.green("Set") : t.dim("Not set")}`);
+        console.log(`  CDP Wallet:    ${process.env.CDP_API_KEY_NAME ? chalk.green("Configured") : t.dim("Not configured")}`);
+
+        // Solana wallet
+        try {
+          const { getSolanaWalletAddress } = await import("../wallet/solana.js");
+          const solAddr = getSolanaWalletAddress(ctx.runtimeDir);
+          console.log(`  Solana:        ${solAddr ? solAddr : t.dim("Not initialized")}`);
+        } catch {
+          console.log(`  Solana:        ${t.dim("Module unavailable")}`);
+        }
+
+        // Commerce policy
+        const commerce = getCommerceEngine();
+        if (commerce) {
+          const policy = commerce.getPolicy();
+          console.log(`\n  ${chalk.cyan("Commerce Policy")}`);
+          console.log(`  Max/tx:          $${policy.maxPerTransaction}`);
+          console.log(`  Daily limit:     $${policy.dailyLimit}`);
+          console.log(`  Auto-approve:    $${policy.autoApproveBelow}`);
+          console.log(`  Require approval: $${policy.requireApprovalAbove}`);
+          if (policy.whitelistedRecipients.length > 0) {
+            console.log(`  Whitelisted:     ${policy.whitelistedRecipients.length} addresses`);
+          }
+          if (policy.blacklistedRecipients.length > 0) {
+            console.log(`  Blacklisted:     ${policy.blacklistedRecipients.length} addresses`);
+          }
+        } else {
+          console.log(`\n  ${t.dim("Commerce: Not enabled")}`);
+        }
+
+        console.log();
+        return;
+      }
+
       // /wallet fund — show address for funding
       if (subcommand === "fund") {
         const addr = getWalletAddress(ctx.runtimeDir);
@@ -514,7 +664,7 @@ const commands: SlashCommand[] = [
       }
 
       console.log();
-      console.log(t.dim("  Subcommands: /wallet export | import | commerce | fund\n"));
+      console.log(t.dim("  Subcommands: /wallet balance | details | export | import | recovery | recover | commerce | fund\n"));
     },
   },
   {
@@ -575,13 +725,225 @@ const commands: SlashCommand[] = [
         console.log();
       } else {
         // Default: full wallet scan
-        console.log(t.dim("\nScanning wallet on Base...\n"));
+        console.log(t.dim("\nScanning wallet on SKALE...\n"));
         const summary = await scanner.scanWallet(addr);
         console.log(formatScanSummary(summary));
         console.log(t.dim("\n  /x402scan history    — Transaction list"));
         console.log(t.dim("  /x402scan verify <hash> — Verify tx on-chain"));
         console.log(t.dim("  /x402scan reconcile — Compare on-chain vs local\n"));
       }
+    },
+  },
+  {
+    name: "x402demo",
+    description: "Run x402 hackathon demo [1-5|all|preflight|stop]",
+    handler: async (args, ctx) => {
+      const chalk = (await import("chalk")).default;
+      const subcommand = args.trim().split(/\s+/)[0]?.toLowerCase() || "";
+
+      // Preflight balance check
+      if (subcommand === "preflight" || subcommand === "check") {
+        const { runPreflight } = await import("../integrations/agentic-commerce/demo/preflight.js");
+        const result = await runPreflight(process.env.AGENT_PRIVATE_KEY);
+        console.log(chalk.bold("\n  x402 Demo Pre-flight Check\n"));
+        console.log(`  Mode:    ${result.mode === "live" ? chalk.green("LIVE") : chalk.yellow("SIMULATION")}`);
+        console.log(`  Address: ${result.address}`);
+        if (result.mode === "live") {
+          console.log(`  sFUEL:   ${result.sFuelBalance}`);
+          console.log(`  USDC:    $${result.usdcBalance.toFixed(6)}`);
+          console.log(`  Ready:   ${result.ready ? chalk.green("YES") : chalk.red("NO")}`);
+        }
+        for (const w of result.warnings) {
+          console.log(chalk.yellow(`  [WARN] ${w}`));
+        }
+        console.log();
+        return;
+      }
+
+      // Stop any running demo services
+      if (subcommand === "stop" || subcommand === "kill") {
+        try {
+          const { stopDemoServices } = await import("../integrations/agentic-commerce/demo/server.js");
+          await stopDemoServices();
+          console.log(chalk.green("\n  Demo services stopped.\n"));
+        } catch {
+          console.log(t.dim("\n  No demo services running.\n"));
+        }
+        return;
+      }
+
+      // Run all 5 tracks sequentially
+      if (subcommand === "all") {
+        try {
+          const { stopDemoServices } = await import("../integrations/agentic-commerce/demo/server.js");
+          await stopDemoServices();
+        } catch { /* nothing running */ }
+
+        console.log(chalk.bold("\n  Running all 5 tracks sequentially...\n"));
+        const trackModulesAll: Record<number, string> = {
+          1: "../integrations/agentic-commerce/demo/scenarios/track1-overall.js",
+          2: "../integrations/agentic-commerce/demo/scenarios/track2-x402.js",
+          3: "../integrations/agentic-commerce/demo/scenarios/track3-ap2.js",
+          4: "../integrations/agentic-commerce/demo/scenarios/track4-defi.js",
+          5: "../integrations/agentic-commerce/demo/scenarios/track5-bite.js",
+        };
+        const trackNamesAll: Record<number, string> = {
+          1: "Overall Best Agentic App",
+          2: "Agentic Tool Usage on x402",
+          3: "Best Integration of AP2",
+          4: "Best Trading / DeFi Agent",
+          5: "Encrypted Agents (BITE v2)",
+        };
+        const results: Array<{ num: number; name: string; ok: boolean; ms: number; err?: string }> = [];
+        const totalStart = Date.now();
+
+        for (let i = 1; i <= 5; i++) {
+          const start = Date.now();
+          try {
+            // Stop services between tracks to avoid port conflicts
+            try { await (await import("../integrations/agentic-commerce/demo/server.js")).stopDemoServices(); } catch {}
+            const mod = await import(trackModulesAll[i]);
+            await mod[`runTrack${i}`](process.env.AGENT_PRIVATE_KEY);
+            results.push({ num: i, name: trackNamesAll[i], ok: true, ms: Date.now() - start });
+          } catch (err) {
+            results.push({ num: i, name: trackNamesAll[i], ok: false, ms: Date.now() - start, err: (err as Error).message });
+          }
+        }
+
+        // Summary
+        console.log(chalk.bold("\n  ══════════════════════════════════════"));
+        console.log(chalk.bold("  DEMO SUMMARY"));
+        console.log(chalk.bold("  ══════════════════════════════════════\n"));
+        for (const r of results) {
+          const icon = r.ok ? chalk.green("[OK]") : chalk.red("[!!]");
+          console.log(`  ${icon} Track ${r.num}: ${r.name} (${(r.ms / 1000).toFixed(1)}s)`);
+          if (r.err) console.log(`       ${chalk.red(r.err)}`);
+        }
+        const passed = results.filter(r => r.ok).length;
+        console.log(`\n  Passed: ${passed}/5 | Total: ${((Date.now() - totalStart) / 1000).toFixed(1)}s\n`);
+        return;
+      }
+
+      // Parse track number
+      const trackNum = /^[1-5]$/.test(subcommand) ? parseInt(subcommand) : 0;
+
+      if (trackNum >= 1 && trackNum <= 5) {
+        const trackModules: Record<number, string> = {
+          1: "../integrations/agentic-commerce/demo/scenarios/track1-overall.js",
+          2: "../integrations/agentic-commerce/demo/scenarios/track2-x402.js",
+          3: "../integrations/agentic-commerce/demo/scenarios/track3-ap2.js",
+          4: "../integrations/agentic-commerce/demo/scenarios/track4-defi.js",
+          5: "../integrations/agentic-commerce/demo/scenarios/track5-bite.js",
+        };
+        const trackNames: Record<number, string> = {
+          1: "Overall Best Agentic App",
+          2: "Agentic Tool Usage on x402",
+          3: "Best Integration of AP2",
+          4: "Best Trading / DeFi Agent",
+          5: "Encrypted Agents (BITE v2)",
+        };
+
+        // Stop any running services first to avoid EADDRINUSE
+        try {
+          const { stopDemoServices } = await import("../integrations/agentic-commerce/demo/server.js");
+          await stopDemoServices();
+        } catch { /* nothing running */ }
+
+        console.log(chalk.bold(`\n  Track ${trackNum}: ${trackNames[trackNum]}\n`));
+        const start = Date.now();
+        try {
+          const mod = await import(trackModules[trackNum]);
+          const runFn = mod[`runTrack${trackNum}`];
+          await runFn(process.env.AGENT_PRIVATE_KEY);
+          console.log(chalk.green(`\n  Completed in ${((Date.now() - start) / 1000).toFixed(1)}s\n`));
+        } catch (err) {
+          const msg = (err as Error).message;
+          if (msg.includes("EADDRINUSE")) {
+            console.log(chalk.red(`\n  Port in use. Run /x402demo stop first, then try again.\n`));
+          } else {
+            console.log(chalk.red(`\n  Track ${trackNum} failed: ${msg}\n`));
+          }
+        }
+        return;
+      }
+
+      // Default: show demo menu
+      console.log(chalk.bold("\n  x402 Agentic Commerce Demo\n"));
+      console.log(`  ${chalk.cyan("Chain:")}    SKALE BITE V2 Sandbox (gasless)`);
+      console.log(`  ${chalk.cyan("Wallet:")}   ${process.env.AGENT_PRIVATE_KEY ? chalk.green("Connected") : chalk.yellow("Simulation mode")}`);
+      console.log();
+      console.log(t.dim("  Tracks:"));
+      console.log(`  /x402demo 1         Track 1: Overall Best Agentic App`);
+      console.log(`  /x402demo 2         Track 2: x402 Autonomous Payments`);
+      console.log(`  /x402demo 3         Track 3: AP2 Authorization Flows`);
+      console.log(`  /x402demo 4         Track 4: DeFi Trading Agent`);
+      console.log(`  /x402demo 5         Track 5: BITE v2 Encrypted Payments`);
+      console.log();
+      console.log(`  /x402demo preflight Pre-flight balance check`);
+      console.log(`  /x402demo stop      Stop running demo services`);
+      console.log(`  /x402demo all       Run all 5 tracks`);
+      console.log();
+    },
+  },
+  {
+    name: "commerce",
+    description: "Agentic commerce integration status",
+    handler: async (_args, ctx) => {
+      const chalk = (await import("chalk")).default;
+      const registry = ctx.agent.getIntegrationRegistry();
+
+      if (!registry) {
+        console.log(t.dim("\n  No integrations loaded.\n"));
+        return;
+      }
+
+      const commerce = registry.get("agentic-commerce");
+      if (!commerce) {
+        console.log(t.dim("\n  Agentic commerce integration not registered.\n"));
+        return;
+      }
+
+      console.log(chalk.bold("\n  Agentic Commerce (x402)\n"));
+
+      const statusColor = commerce.status === "active" ? chalk.green : commerce.status === "error" ? chalk.red : chalk.yellow;
+      console.log(`  Status:  ${statusColor(commerce.status)}`);
+
+      if (commerce.error) {
+        console.log(`  Error:   ${chalk.red(commerce.error)}`);
+      }
+
+      if (commerce.enabled) {
+        const health = await commerce.instance.healthCheck();
+        console.log(`  Wallet:  ${health.message || "Unknown"}`);
+        console.log(`  Tools:   ${commerce.manifest.tools.length} available`);
+        console.log();
+        console.log(t.dim("  Available tools:"));
+        for (const tool of commerce.manifest.tools) {
+          console.log(`    ${chalk.cyan(tool.name)} — ${tool.description.slice(0, 60)}...`);
+        }
+      } else {
+        console.log();
+        console.log(t.dim("  To enable, set AGENT_PRIVATE_KEY in .env"));
+        console.log(t.dim("  Or Wispy will auto-export from the wallet at startup."));
+      }
+
+      // Connected channels (gateway, Telegram, REST, etc.)
+      console.log();
+      console.log(chalk.bold("  Connected Channels\n"));
+      const { getAllChannels } = await import("../channels/dock.js");
+      const channels = getAllChannels();
+      if (channels.length === 0) {
+        console.log(t.dim("  No channels connected. Start the gateway with /gateway start"));
+      } else {
+        for (const ch of channels) {
+          const icon = ch.status === "connected" ? chalk.green("\u25CF") : ch.status === "error" ? chalk.red("\u25CF") : chalk.yellow("\u25CF");
+          const caps = Object.entries(ch.capabilities).filter(([, v]) => v).map(([k]) => k).join(", ");
+          console.log(`  ${icon} ${chalk.bold(ch.name)} (${ch.type}) -- ${caps}`);
+          if (ch.connectedAt) console.log(`    ${t.dim("Connected: " + ch.connectedAt)}`);
+          if (ch.error) console.log(`    ${chalk.red("Error: " + ch.error)}`);
+        }
+      }
+      console.log();
     },
   },
   {
@@ -1153,7 +1515,7 @@ const commands: SlashCommand[] = [
   },
   {
     name: "provider",
-    description: "Switch AI provider [gemini|openai|anthropic|ollama]",
+    description: "Switch AI provider [gemini|openai|anthropic|ollama|groq|openrouter|kimi]",
     handler: async (args, ctx) => {
       const chalk = (await import("chalk")).default;
       const { loadConfig, saveConfig } = await import("../config/config.js");
@@ -1163,10 +1525,11 @@ const commands: SlashCommand[] = [
       const PROVIDERS = {
         gemini: { name: "Google Gemini", color: chalk.blue, models: "gemini-3-pro, gemini-2.5-flash, etc." },
         openai: { name: "OpenAI", color: chalk.green, models: "gpt-4o, gpt-4-turbo, o1, etc." },
-        anthropic: { name: "Anthropic", color: chalk.magenta, models: "Various models" },
+        anthropic: { name: "Anthropic", color: chalk.magenta, models: "claude-opus-4, claude-sonnet-4, claude-haiku-4.5" },
         ollama: { name: "Ollama (Local)", color: chalk.yellow, models: "llama3, mistral, codellama, etc." },
         openrouter: { name: "OpenRouter", color: chalk.cyan, models: "Any model via OpenRouter" },
         groq: { name: "Groq", color: chalk.red, models: "llama-3.3-70b, mixtral-8x7b, etc." },
+        kimi: { name: "Kimi (Moonshot)", color: chalk.rgb(97, 175, 239), models: "moonshot-v1-8k, v1-32k, v1-128k" },
       };
 
       if (!input) {
@@ -2382,6 +2745,165 @@ const commands: SlashCommand[] = [
           console.log(chalk.red(`  Unknown subcommand: ${subCmd}`));
           console.log(chalk.dim("  Use /marathon for help."));
       }
+    },
+  },
+  {
+    name: "skills",
+    description: "Browser skill management [custom|create|delete|inspect|export|import]",
+    handler: async (args, ctx) => {
+      const chalk = (await import("chalk")).default;
+      const parts = args.trim().split(/\s+/);
+      const subcommand = parts[0]?.toLowerCase();
+
+      // Get the integration registry to access browser-engine
+      const agent = ctx.agent as any;
+      const registry = agent.integrationRegistry;
+      if (!registry) {
+        console.log(t.dim("\n  Integration registry not available.\n"));
+        return;
+      }
+
+      const browserEngine = registry.get("browser-engine");
+      if (!browserEngine) {
+        console.log(t.dim("\n  Browser Engine integration not enabled.\n"));
+        return;
+      }
+
+      const skillRegistry = (browserEngine as any).skillRegistry;
+      const skillStore = (browserEngine as any).skillStore;
+      if (!skillRegistry) {
+        console.log(t.dim("\n  Skill registry not initialized.\n"));
+        return;
+      }
+
+      if (subcommand === "custom") {
+        // List only custom skills
+        const customIds = skillStore?.listIds() || [];
+        if (customIds.length === 0) {
+          console.log(t.dim("\n  No custom skills found. Create one with: /skills create <name>\n"));
+          return;
+        }
+        console.log(chalk.bold(`\n  Custom Skills (${customIds.length})\n`));
+        for (const id of customIds) {
+          const skill = skillRegistry.get(id);
+          if (skill) {
+            console.log(`  ${chalk.cyan(id)} -- ${skill.name} (${skill.steps.length} steps)`);
+          }
+        }
+        console.log();
+        return;
+      }
+
+      if (subcommand === "inspect") {
+        const skillId = parts[1];
+        if (!skillId) {
+          console.log(chalk.red("\n  Usage: /skills inspect <skill-id>\n"));
+          return;
+        }
+        const skill = skillRegistry.get(skillId);
+        if (!skill) {
+          console.log(chalk.red(`\n  Skill "${skillId}" not found.\n`));
+          return;
+        }
+        console.log(chalk.bold(`\n  ${skill.name}`));
+        console.log(`  ID:       ${skill.id}`);
+        console.log(`  Category: ${skill.category}`);
+        console.log(`  Tags:     ${skill.tags.join(", ")}`);
+        console.log(`  Custom:   ${skillStore?.exists(skillId) ? chalk.yellow("Yes") : "No"}`);
+        console.log(`\n  ${t.dim("Parameters:")}`);
+        for (const p of skill.parameters) {
+          console.log(`    ${p.name}${p.required ? chalk.red("*") : ""}: ${p.description}`);
+        }
+        console.log(`\n  ${t.dim(`Steps (${skill.steps.length}):`)} `);
+        for (let i = 0; i < skill.steps.length; i++) {
+          const s = skill.steps[i];
+          console.log(`    ${i + 1}. ${s.action}${s.target ? ` -> ${s.target}` : ""}${s.description ? ` (${s.description})` : ""}`);
+        }
+        console.log();
+        return;
+      }
+
+      if (subcommand === "delete") {
+        const skillId = parts[1];
+        if (!skillId) {
+          console.log(chalk.red("\n  Usage: /skills delete <skill-id>\n"));
+          return;
+        }
+        if (!skillStore?.exists(skillId)) {
+          console.log(chalk.red(`\n  "${skillId}" is not a custom skill or doesn't exist.\n`));
+          return;
+        }
+        skillStore.delete(skillId);
+        console.log(chalk.green(`\n  Deleted custom skill: ${skillId}\n`));
+        return;
+      }
+
+      if (subcommand === "export") {
+        const skillId = parts[1];
+        if (!skillId) {
+          console.log(chalk.red("\n  Usage: /skills export <skill-id>\n"));
+          return;
+        }
+        const skill = skillRegistry.get(skillId);
+        if (!skill) {
+          console.log(chalk.red(`\n  Skill "${skillId}" not found.\n`));
+          return;
+        }
+        console.log(JSON.stringify(skill, null, 2));
+        return;
+      }
+
+      if (subcommand === "import") {
+        const filePath = parts[1];
+        if (!filePath) {
+          console.log(chalk.red("\n  Usage: /skills import <json-file-path>\n"));
+          return;
+        }
+        try {
+          const { readFileSync } = await import("fs");
+          const content = readFileSync(filePath, "utf-8");
+          const skill = JSON.parse(content);
+          if (!skill.id || !skill.name || !skill.steps) {
+            console.log(chalk.red("\n  Invalid skill file: must have id, name, and steps.\n"));
+            return;
+          }
+          skillRegistry.register(skill);
+          skillStore?.save(skill);
+          console.log(chalk.green(`\n  Imported skill: ${skill.name} (${skill.id})\n`));
+        } catch (err: any) {
+          console.log(chalk.red(`\n  Import failed: ${err.message}\n`));
+        }
+        return;
+      }
+
+      if (subcommand === "create") {
+        const name = parts.slice(1).join(" ");
+        if (!name) {
+          console.log(chalk.red("\n  Usage: /skills create <skill-name>\n"));
+          console.log(t.dim("  Example: /skills create LinkedIn Job Search\n"));
+          return;
+        }
+        console.log(t.dim(`\n  To create "${name}", describe the goal to your agent in natural language.`));
+        console.log(t.dim("  The agent will use web_skill_create to generate it.\n"));
+        console.log(`  ${chalk.cyan("Try:")} "Create a browser skill called '${name}' that ..."\n`);
+        return;
+      }
+
+      // Default: list all skills
+      const allSkills = skillRegistry.listAll();
+      const customIds = new Set(skillStore?.listIds() || []);
+      let total = 0;
+      console.log(chalk.bold("\n  Browser Skills\n"));
+      for (const [category, skills] of Object.entries(allSkills)) {
+        console.log(`  ${chalk.cyan(category.toUpperCase())} (${(skills as any[]).length})`);
+        for (const s of skills as any[]) {
+          const custom = customIds.has(s.id) ? chalk.yellow(" [custom]") : "";
+          console.log(`    ${s.id} -- ${s.name}${custom}`);
+          total++;
+        }
+      }
+      console.log(`\n  ${total} skills total (${customIds.size} custom)\n`);
+      console.log(t.dim("  Subcommands: /skills custom | create | delete | inspect | export | import\n"));
     },
   },
 ];

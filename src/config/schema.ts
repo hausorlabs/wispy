@@ -40,9 +40,10 @@ export interface WispyConfig {
     ollama?: ProviderConfig;
     openrouter?: ProviderConfig;
     groq?: ProviderConfig;
+    kimi?: ProviderConfig;
   };
   // Active provider selection
-  activeProvider?: "gemini" | "openai" | "anthropic" | "ollama" | "openrouter" | "groq";
+  activeProvider?: "gemini" | "openai" | "anthropic" | "ollama" | "openrouter" | "groq" | "kimi";
   channels: {
     telegram?: { enabled: boolean; token?: string };
     whatsapp?: { enabled: boolean };
@@ -78,6 +79,7 @@ export interface WispyConfig {
     toolAllowlist?: string[];
     toolDenylist?: string[];
     autonomousMode?: boolean; // Auto-approve file/code operations
+    fullFilesystemAccess?: boolean; // Allow tools to access full drive (not just .wispy)
   };
   // Extended thinking (MoltBot-style)
   thinking?: {
@@ -244,12 +246,30 @@ const configSchema = {
             },
           },
         },
+        kimi: {
+          type: "object",
+          nullable: true,
+          properties: {
+            apiKey: { type: "string", nullable: true },
+            baseUrl: { type: "string", nullable: true },
+            models: {
+              type: "object",
+              nullable: true,
+              properties: {
+                default: { type: "string", nullable: true },
+                reasoning: { type: "string", nullable: true },
+                fast: { type: "string", nullable: true },
+                vision: { type: "string", nullable: true },
+              },
+            },
+          },
+        },
       },
     },
     activeProvider: {
       type: "string",
       nullable: true,
-      enum: ["gemini", "openai", "anthropic", "ollama", "openrouter", "groq"],
+      enum: ["gemini", "openai", "anthropic", "ollama", "openrouter", "groq", "kimi"],
     },
     channels: {
       type: "object",
@@ -374,6 +394,7 @@ const configSchema = {
         toolAllowlist: { type: "array", nullable: true, items: { type: "string" } },
         toolDenylist: { type: "array", nullable: true, items: { type: "string" } },
         autonomousMode: { type: "boolean", nullable: true },
+        fullFilesystemAccess: { type: "boolean", nullable: true },
       },
     },
     thinking: {

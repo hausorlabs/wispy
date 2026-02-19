@@ -9,6 +9,9 @@ import {
   createIntentMandate,
   createCartMandate,
   createPaymentMandate,
+  signIntentMandate,
+  signCartMandate,
+  signPaymentMandate,
 } from "./mandates.js";
 import type { IntentMandate, CartMandate, PaymentMandate } from "./mandates.js";
 import {
@@ -42,11 +45,13 @@ export type FailureReason =
 export class AP2Flow {
   private readonly buyer: X402Buyer;
   private readonly tracker: SpendTracker;
+  private readonly privateKey?: string;
   private readonly records: AP2TransactionRecord[] = [];
 
-  constructor(buyer: X402Buyer, tracker: SpendTracker) {
+  constructor(buyer: X402Buyer, tracker: SpendTracker, privateKey?: string) {
     this.buyer = buyer;
     this.tracker = tracker;
+    this.privateKey = privateKey;
   }
 
   /**
@@ -57,9 +62,9 @@ export class AP2Flow {
     console.log(`\n[AP2] === Starting AP2 Purchase Flow ===`);
     console.log(`[AP2] Description: ${params.description}`);
 
-    // Step 1: Create IntentMandate
+    // Step 1: Create IntentMandate (signed if private key available)
     console.log(`[AP2] Step 1: Creating IntentMandate...`);
-    const intent = createIntentMandate({
+    let intent = createIntentMandate({
       agentId: this.buyer.address,
       description: params.description,
       maxBudget: params.expectedPrice,
@@ -67,6 +72,10 @@ export class AP2Flow {
       requiresConfirmation: params.requiresConfirmation,
       signedBy: this.buyer.address,
     });
+    if (this.privateKey) {
+      intent = await signIntentMandate(intent, this.privateKey);
+      console.log(`[AP2] Intent signed: ${intent.signature?.slice(0, 20)}...`);
+    }
     console.log(`[AP2] Intent created: ${intent.id}`);
 
     // Step 2: Simulate merchant cart response
@@ -98,7 +107,11 @@ export class AP2Flow {
       );
     }
 
-    const payment = createPaymentMandate(cart, this.buyer.address);
+    let payment = createPaymentMandate(cart, this.buyer.address);
+    if (this.privateKey) {
+      payment = await signPaymentMandate(payment, this.privateKey);
+      console.log(`[AP2] Payment signed: ${payment.signature?.slice(0, 20)}...`);
+    }
     console.log(`[AP2] Payment authorized: ${payment.id}`);
 
     // Step 4: Execute x402 payment via buyer
@@ -111,12 +124,16 @@ export class AP2Flow {
         `AP2: ${params.description}`,
       );
 
-      // Extract delivery data
+      // Extract delivery data (clone first — body may have been read by x402 SDK)
       let deliveryData: unknown = null;
       try {
-        deliveryData = await response.json();
+        deliveryData = await response.clone().json();
       } catch {
-        deliveryData = await response.text();
+        try {
+          deliveryData = await response.clone().text();
+        } catch {
+          deliveryData = { note: "Response body consumed by x402 settlement" };
+        }
       }
 
       // Get tx hash from payment history
@@ -220,19 +237,19 @@ export class AP2Flow {
       return JSON.stringify(this.records, null, 2);
     }
 
+    const success = this.records.filter((r) => r.receipt.status === "success").length;
+    const failed = this.records.length - success;
+
     const lines: string[] = [
-      `# AP2 Audit Trail`,
+      `━━━ AP2 Audit Trail ━━━`,
       ``,
-      `**Agent:** \`${this.buyer.address}\``,
-      `**Total transactions:** ${this.records.length}`,
-      `**Successful:** ${this.records.filter((r) => r.receipt.status === "success").length}`,
-      `**Failed:** ${this.records.filter((r) => r.receipt.status !== "success").length}`,
+      `  Agent:        ${this.buyer.address}`,
+      `  Transactions: ${this.records.length} (${success} success, ${failed} failed)`,
       ``,
     ];
 
     for (let i = 0; i < this.records.length; i++) {
-      lines.push(`---`);
-      lines.push(`### Transaction ${i + 1}`);
+      lines.push(`  ── Transaction ${i + 1} ──`);
       lines.push(formatReceiptMarkdown(this.records[i]));
       lines.push(``);
     }

@@ -88,6 +88,7 @@ export class ToolExecutor {
   private cronService?: CronService;
   private reminderService?: ReminderService;
   private progressCallback?: ProgressCallback;
+  private liveStream?: import("../vision/live-stream.js").LiveVisionStream;
 
   constructor(
     config: WispyConfig,
@@ -103,6 +104,23 @@ export class ToolExecutor {
     this.memoryManager = memoryManager;
     this.integrationRegistry = integrationRegistry;
     this.mcpRegistry = mcpRegistry;
+  }
+
+  /**
+   * Check if a file path is allowed based on filesystem access settings.
+   */
+  private isPathAllowed(filePath: string): boolean {
+    // Always allow runtime and soul directories
+    if (filePath.startsWith(this.runtimeDir) || filePath.startsWith(this.soulDir)) return true;
+
+    // Autonomous mode or full filesystem access: allow all
+    if (this.config.security.autonomousMode || this.config.security.fullFilesystemAccess) return true;
+
+    // Standard mode: restrict to workspace
+    const workspaceDir = resolve(this.runtimeDir, "workspace");
+    if (filePath.startsWith(workspaceDir)) return true;
+
+    return false;
   }
 
   /**
@@ -248,6 +266,8 @@ export class ToolExecutor {
           return this.executeERC8004Feedback(tool.args);
         case "erc8004_verify":
           return this.executeERC8004Verify(tool.args);
+        case "deploy_erc8004":
+          return this.executeDeployERC8004(tool.args);
         case "a2a_discover":
           return this.executeA2ADiscover(tool.args);
         case "a2a_delegate":
@@ -279,9 +299,13 @@ export class ToolExecutor {
           return this.executeLatexCompile(tool.args);
         case "research_report":
           return this.executeResearchReport(tool.args);
+        case "generate_x402_report":
+          return this.executeGenerateX402Report(tool.args);
         // === Telegram Document Delivery ===
         case "send_document_to_telegram":
           return this.executeSendDocumentToTelegram(tool.args);
+        case "telegram_list_files":
+          return this.executeTelegramListFiles(tool.args);
         case "send_progress_update":
           return this.executeSendProgressUpdate(tool.args);
         case "ask_user_confirmation":
@@ -316,6 +340,17 @@ export class ToolExecutor {
           return this.executeDesktopScreenshot(tool.args);
         case "screen_record":
           return this.executeScreenRecord(tool.args);
+        // === Webcam & Live Vision ===
+        case "webcam_capture":
+          return this.executeWebcamCapture(tool.args);
+        case "webcam_record":
+          return this.executeWebcamRecord(tool.args);
+        case "webcam_list_devices":
+          return this.executeWebcamListDevices();
+        case "webcam_live_start":
+          return this.executeWebcamLiveStart(tool.args);
+        case "webcam_live_stop":
+          return this.executeWebcamLiveStop();
         // === Git & GitHub ===
         case "git_init":
           return this.executeGitInit(tool.args);
@@ -408,30 +443,117 @@ export class ToolExecutor {
     }
 
     try {
-      // Use workspace directory as cwd for relative commands
-      const { join } = await import("path");
-      const workspaceDir = join(this.runtimeDir, "workspace");
-      ensureDir(workspaceDir);
+      // Determine working directory: explicit cwd arg, or fallback to workspace
+      const { join, isAbsolute } = await import("path");
+      const customCwd = args.cwd ? String(args.cwd) : "";
+      let effectiveCwd: string;
+
+      if (customCwd && isAbsolute(customCwd) && existsSync(customCwd)) {
+        effectiveCwd = customCwd;
+      } else {
+        const workspaceDir = join(this.runtimeDir, "workspace");
+        ensureDir(workspaceDir);
+        effectiveCwd = workspaceDir;
+      }
 
       const { stdout, stderr } = await execAsync(command, {
         timeout: 180000, // 3 minutes for npm operations
         maxBuffer: 10 * 1024 * 1024, // 10MB for large outputs
-        cwd: workspaceDir, // Run commands in workspace
+        cwd: effectiveCwd,
         env: { ...process.env },
       });
 
-      const output = sanitizeOutput(stdout + (stderr ? `\nSTDERR: ${stderr}` : ""));
+      const combined = stdout + (stderr ? `\nSTDERR: ${stderr}` : "");
+      const output = sanitizeOutput(combined);
+
+      // Self-healing: detect errors in successful exit code outputs (e.g. npm warnings, TS errors)
+      const healingHint = this.detectErrorsForSelfHealing(combined);
+      if (healingHint) {
+        return { success: true, output: output + `\n\n[SELF-HEAL] ${healingHint}` };
+      }
+
       return { success: true, output };
     } catch (err: any) {
       const output = sanitizeOutput(err.stdout || "");
-      const error = sanitizeOutput(err.stderr || err.message || "Command failed");
+      const errorMsg = sanitizeOutput(err.stderr || err.message || "Command failed");
+
+      // Self-healing: enrich error with fix hint
+      const healingHint = this.detectErrorsForSelfHealing(err.stderr || err.stdout || err.message || "");
+      const error = healingHint
+        ? `${errorMsg}\n\n[SELF-HEAL] ${healingHint}`
+        : errorMsg;
+
       return { success: false, output, error };
     }
+  }
+
+  /**
+   * Self-healing: Detect common errors and provide fix hints for the agent.
+   * Returns a hint string or null if no actionable error is detected.
+   */
+  private detectErrorsForSelfHealing(output: string): string | null {
+    if (!output) return null;
+    const lower = output.toLowerCase();
+
+    // Module not found
+    if (lower.includes("module not found") || lower.includes("cannot find module")) {
+      const match = output.match(/Cannot find module ['"]([^'"]+)['"]/i);
+      const mod = match?.[1] || "the missing module";
+      return `Missing module detected: ${mod}. Fix: run "npm install ${mod}" then retry.`;
+    }
+
+    // TypeScript errors
+    if (lower.includes("ts(") || lower.includes("error ts")) {
+      return "TypeScript compilation errors detected. Read the error messages, fix the type issues in the source files, then rebuild.";
+    }
+
+    // ESLint / Syntax errors
+    if (lower.includes("syntaxerror") || lower.includes("unexpected token")) {
+      return "Syntax error detected. Check the file for missing brackets, semicolons, or invalid syntax. Fix and retry.";
+    }
+
+    // Port in use
+    if (lower.includes("eaddrinuse") || lower.includes("address already in use")) {
+      const portMatch = output.match(/port (\d+)/i) || output.match(/:(\d{4,5})/);
+      const port = portMatch?.[1] || "the port";
+      return `Port ${port} is already in use. Fix: kill the process using the port or use a different port.`;
+    }
+
+    // Permission denied
+    if (lower.includes("eacces") || lower.includes("permission denied")) {
+      return "Permission denied. Try using a relative path in the workspace directory instead.";
+    }
+
+    // npm ERR
+    if (lower.includes("npm err!") || lower.includes("npm error")) {
+      if (lower.includes("peer dep") || lower.includes("peer dependency")) {
+        return "Peer dependency conflict. Fix: run with --legacy-peer-deps flag.";
+      }
+      if (lower.includes("enoent") || lower.includes("no such file")) {
+        return "File or directory not found. Verify the path exists before running the command.";
+      }
+      return "npm error detected. Read the error output, fix the issue, and retry.";
+    }
+
+    // React/Next.js build errors
+    if (lower.includes("failed to compile") || lower.includes("build error")) {
+      return "Build failed. Read the specific error lines, fix the code, and rebuild.";
+    }
+
+    // General error pattern (only for meaningful errors, not warnings)
+    if ((lower.includes("error:") || lower.includes("error -")) && !lower.includes("0 error")) {
+      return "Errors detected in output. Read the error messages, fix the root cause, and retry the command.";
+    }
+
+    return null;
   }
 
   private executeFileRead(args: Record<string, unknown>): ToolResult {
     const path = String(args.path || "");
     if (!path) return { success: false, output: "", error: "No path provided" };
+    if (!this.isPathAllowed(resolve(path))) {
+      return { success: false, output: "", error: `Access denied: ${path}\nEnable full filesystem access with: /setup or set security.fullFilesystemAccess in config.` };
+    }
     if (!existsSync(path)) return { success: false, output: "", error: `File not found: ${path}` };
 
     try {
@@ -460,6 +582,10 @@ export class ToolExecutor {
       path = resolvePath(workspaceDir, path);
     }
 
+    if (!this.isPathAllowed(path)) {
+      return { success: false, output: "", error: `Access denied: ${path}\nEnable full filesystem access with: /setup or set security.fullFilesystemAccess in config.` };
+    }
+
     // Create checkpoint before overwrite
     if (existsSync(path)) {
       try { createCheckpoint(this.runtimeDir, path); } catch { /* non-fatal */ }
@@ -479,11 +605,10 @@ export class ToolExecutor {
     } catch (err: any) {
       // Handle permission errors with helpful message
       if (err.code === "EPERM" || err.code === "EACCES") {
-        const workspaceDir = join(this.runtimeDir, "workspace");
         return {
           success: false,
           output: "",
-          error: `Permission denied: ${path}\n\nI don't have write access to this location. Try using a relative path (e.g., "calculator/index.html") and I'll create it in my workspace: ${workspaceDir}`,
+          error: `Permission denied: ${path}\n\nI don't have write access to this location. Try a different directory, or check folder permissions.`,
         };
       }
       return { success: false, output: "", error: err.message };
@@ -831,23 +956,44 @@ export class ToolExecutor {
     if (!imagePath) return { success: false, output: "", error: "No image path provided" };
     if (!existsSync(imagePath)) return { success: false, output: "", error: `Image not found: ${imagePath}` };
 
-    if (!this.currentChatContext?.sendImage) {
-      return {
-        success: false,
-        output: "",
-        error: "No chat context available. This tool only works when responding to a message in Telegram/WhatsApp.",
-      };
+    // Try direct chat context first (available when request came from Telegram/WhatsApp)
+    if (this.currentChatContext?.sendImage) {
+      try {
+        await this.currentChatContext.sendImage(imagePath, caption);
+        return {
+          success: true,
+          output: `Image sent to ${this.currentChatContext.channel}:${this.currentChatContext.peerId}\nPath: ${imagePath}${caption ? `\nCaption: ${caption}` : ""}`,
+        };
+      } catch (err: any) {
+        return { success: false, output: "", error: `Failed to send image: ${err.message}` };
+      }
     }
 
+    // Fallback: cross-channel dispatch via dock (CLI -> Telegram)
     try {
-      await this.currentChatContext.sendImage(imagePath, caption);
-      return {
-        success: true,
-        output: `Image sent to ${this.currentChatContext.channel}:${this.currentChatContext.peerId}\nPath: ${imagePath}${caption ? `\nCaption: ${caption}` : ""}`,
-      };
-    } catch (err: any) {
-      return { success: false, output: "", error: `Failed to send image: ${err.message}` };
-    }
+      const { getChannelDispatcher, getChannel } = await import("../channels/dock.js");
+      const telegramDispatcher = getChannelDispatcher("telegram");
+      const telegramChannel = getChannel("telegram");
+      if (telegramDispatcher && telegramChannel?.status === "connected") {
+        const chatId = process.env.TELEGRAM_CHAT_ID || process.env.WISPY_TELEGRAM_CHAT_ID;
+        if (chatId) {
+          const sent = await telegramDispatcher.sendImage(chatId, imagePath, caption);
+          if (sent) {
+            return {
+              success: true,
+              output: `Image sent to Telegram chat ${chatId} via cross-channel dispatch\nPath: ${imagePath}${caption ? `\nCaption: ${caption}` : ""}`,
+            };
+          }
+        }
+        return { success: false, output: "", error: "Telegram is connected but no TELEGRAM_CHAT_ID set. Set the env var to enable cross-channel image sending from CLI." };
+      }
+    } catch { /* dock import or dispatch failed -- fall through */ }
+
+    return {
+      success: false,
+      output: "",
+      error: "No chat context available and no connected Telegram channel found. Use this tool from Telegram, or set TELEGRAM_CHAT_ID to enable cross-channel dispatch.",
+    };
   }
 
   private async executeSendMessage(args: Record<string, unknown>): Promise<ToolResult> {
@@ -1142,11 +1288,60 @@ export class ToolExecutor {
 
   private async executeWalletBalance(_args: Record<string, unknown>): Promise<ToolResult> {
     try {
+      // SKALE wallet bridge: when AGENT_PRIVATE_KEY is set, query SKALE BITE V2
+      const privateKey = process.env.AGENT_PRIVATE_KEY as `0x${string}` | undefined;
+      if (privateKey) {
+        const { createPublicClient, http, formatUnits } = await import("viem");
+        const { skaleBiteSandbox, SKALE_BITE_SANDBOX } = await import(
+          "../integrations/agentic-commerce/config.js"
+        );
+        const { privateKeyToAccount } = await import("viem/accounts");
+
+        const account = privateKeyToAccount(privateKey);
+        const publicClient = createPublicClient({
+          chain: skaleBiteSandbox,
+          transport: http(),
+        });
+
+        // Query USDC balance
+        const usdcRaw = await publicClient.readContract({
+          address: SKALE_BITE_SANDBOX.usdc as `0x${string}`,
+          abi: [{ name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ name: "", type: "uint256" }] }],
+          functionName: "balanceOf",
+          args: [account.address],
+        });
+        const usdcBalance = formatUnits(usdcRaw as bigint, 6);
+
+        // Query sFUEL (native gas)
+        const sFuel = await publicClient.getBalance({ address: account.address });
+        const sFuelBalance = formatUnits(sFuel, 18);
+
+        const lines = [
+          `Network: SKALE BITE V2 Sandbox (gasless)`,
+          `Address: ${account.address}`,
+          `USDC Balance: ${usdcBalance} USDC`,
+          `sFUEL: ${sFuelBalance}`,
+          `Explorer: ${SKALE_BITE_SANDBOX.explorerUrl}/address/${account.address}`,
+        ];
+
+        // Include agentic-commerce budget if available
+        if (this.integrationRegistry) {
+          try {
+            const budget = await this.integrationRegistry.executeTool("x402_check_budget", {});
+            if (budget?.success) lines.push("", "Spending Status:", budget.output);
+          } catch { /* no budget info */ }
+        }
+
+        return { success: true, output: lines.join("\n") };
+      }
+
+      // Fallback: original Base wallet
       const { getBalance, getWalletAddress } = await import("../wallet/x402.js");
       const address = getWalletAddress(this.runtimeDir);
       if (!address) return { success: false, output: "", error: "Wallet not initialized" };
       const balance = await getBalance(this.runtimeDir);
-      return { success: true, output: `Address: ${address}\nUSDC Balance: ${balance}` };
+      const { addressLink } = await import("../wallet/explorer.js");
+      return { success: true, output: `Address: ${address}\nUSDC Balance: ${balance}\nExplorer: ${addressLink(address)}` };
     } catch (err: any) {
       return { success: false, output: "", error: err.message };
     }
@@ -1157,7 +1352,56 @@ export class ToolExecutor {
     const amount = String(args.amount || "");
     if (!to || !amount) return { success: false, output: "", error: "to and amount required" };
 
-    // Get X402 client
+    // SKALE wallet bridge: when AGENT_PRIVATE_KEY is set, transfer on SKALE
+    const privateKey = process.env.AGENT_PRIVATE_KEY as `0x${string}` | undefined;
+    if (privateKey) {
+      try {
+        // Request approval first
+        const approved = await requestApproval("wallet_pay", `Send ${amount} USDC to ${to} on SKALE`, args);
+        if (!approved) return { success: false, output: "", error: "Payment not approved" };
+
+        const { createPublicClient, createWalletClient, http, parseUnits } = await import("viem");
+        const { skaleBiteSandbox, SKALE_BITE_SANDBOX } = await import(
+          "../integrations/agentic-commerce/config.js"
+        );
+        const { privateKeyToAccount } = await import("viem/accounts");
+
+        const account = privateKeyToAccount(privateKey);
+        const walletClient = createWalletClient({
+          account,
+          chain: skaleBiteSandbox,
+          transport: http(),
+        });
+        const publicClient = createPublicClient({
+          chain: skaleBiteSandbox,
+          transport: http(),
+        });
+
+        const hash = await walletClient.writeContract({
+          address: SKALE_BITE_SANDBOX.usdc as `0x${string}`,
+          abi: [{ name: "transfer", type: "function", stateMutability: "nonpayable", inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ name: "", type: "bool" }] }],
+          functionName: "transfer",
+          args: [to as `0x${string}`, parseUnits(amount, 6)],
+        });
+
+        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+        return {
+          success: true,
+          output: [
+            `Sent ${amount} USDC to ${to}`,
+            `Network: SKALE BITE V2 (gasless)`,
+            `Tx: ${hash}`,
+            `Status: ${receipt.status === "success" ? "confirmed" : "failed"}`,
+            `Explorer: ${SKALE_BITE_SANDBOX.explorerUrl}/tx/${hash}`,
+          ].join("\n"),
+        };
+      } catch (err: any) {
+        return { success: false, output: "", error: `SKALE transfer failed: ${err.message}` };
+      }
+    }
+
+    // Fallback: original Base wallet
     const { getX402Client } = await import("../wallet/x402-client.js");
     const client = getX402Client();
     if (!client) return { success: false, output: "", error: "Wallet not initialized. Run /wallet first." };
@@ -1175,9 +1419,11 @@ export class ToolExecutor {
           amount, currency: "USDC", recipient: to, network: "base",
         });
         if (result.success) commerce.recordPayment(to, parseFloat(amount), result.txHash!);
-        return result.success
-          ? { success: true, output: `Sent ${amount} USDC to ${to}\nTx: ${result.txHash}` }
-          : { success: false, output: "", error: result.error || "Transaction failed" };
+        if (result.success) {
+          const { txLink } = await import("../wallet/explorer.js");
+          return { success: true, output: `Sent ${amount} USDC to ${to}\nTx: ${result.txHash}\nExplorer: ${txLink(result.txHash!)}` };
+        }
+        return { success: false, output: "", error: result.error || "Transaction failed" };
       }
     }
 
@@ -1194,12 +1440,66 @@ export class ToolExecutor {
       commerce.recordPayment(to, parseFloat(amount), result.txHash!);
     }
 
-    return result.success
-      ? { success: true, output: `Sent ${amount} USDC to ${to}\nTx: ${result.txHash}` }
-      : { success: false, output: "", error: result.error || "Transaction failed" };
+    if (result.success) {
+      const { txLink } = await import("../wallet/explorer.js");
+      return { success: true, output: `Sent ${amount} USDC to ${to}\nTx: ${result.txHash}\nExplorer: ${txLink(result.txHash!)}` };
+    }
+    return { success: false, output: "", error: result.error || "Transaction failed" };
   }
 
   private async executeCommerceStatus(): Promise<ToolResult> {
+    // SKALE wallet bridge: when AGENT_PRIVATE_KEY is set, show SKALE status
+    const privateKey = process.env.AGENT_PRIVATE_KEY as `0x${string}` | undefined;
+    if (privateKey) {
+      try {
+        const { createPublicClient, http, formatUnits } = await import("viem");
+        const { skaleBiteSandbox, SKALE_BITE_SANDBOX } = await import(
+          "../integrations/agentic-commerce/config.js"
+        );
+        const { privateKeyToAccount } = await import("viem/accounts");
+
+        const account = privateKeyToAccount(privateKey);
+        const publicClient = createPublicClient({
+          chain: skaleBiteSandbox,
+          transport: http(),
+        });
+
+        const usdcRaw = await publicClient.readContract({
+          address: SKALE_BITE_SANDBOX.usdc as `0x${string}`,
+          abi: [{ name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ name: "", type: "uint256" }] }],
+          functionName: "balanceOf",
+          args: [account.address],
+        });
+        const usdcBalance = formatUnits(usdcRaw as bigint, 6);
+
+        const lines = [
+          "Commerce Status (SKALE BITE V2):",
+          `  Network:   SKALE BITE V2 Sandbox (gasless)`,
+          `  Wallet:    ${account.address}`,
+          `  USDC:      ${usdcBalance} USDC`,
+          `  Explorer:  ${SKALE_BITE_SANDBOX.explorerUrl}/address/${account.address}`,
+        ];
+
+        // Include integration budget/audit data
+        if (this.integrationRegistry) {
+          try {
+            const budget = await this.integrationRegistry.executeTool("x402_check_budget", {});
+            if (budget?.success) lines.push("", "Budget Status:", budget.output);
+          } catch { /* no budget */ }
+
+          try {
+            const audit = await this.integrationRegistry.executeTool("x402_audit_trail", {});
+            if (audit?.success) lines.push("", "Audit Trail:", audit.output);
+          } catch { /* no audit */ }
+        }
+
+        return { success: true, output: lines.join("\n") };
+      } catch (err: any) {
+        return { success: false, output: "", error: `SKALE status failed: ${err.message}` };
+      }
+    }
+
+    // Fallback: original Base commerce engine
     const { getCommerceEngine } = await import("../wallet/commerce.js");
     const commerce = getCommerceEngine();
     if (!commerce) return { success: false, output: "", error: "Commerce engine not initialized" };
@@ -1220,13 +1520,63 @@ export class ToolExecutor {
     ];
 
     if (status.recentPayments.length > 0) {
+      const { txLink } = await import("../wallet/explorer.js");
       lines.push("", "Recent Payments:");
       for (const p of status.recentPayments) {
-        lines.push(`  $${p.amount} -> ${p.to.slice(0, 10)}... (${p.txHash.slice(0, 14)}...)`);
+        lines.push(`  $${p.amount} -> ${p.to.slice(0, 10)}... [View Tx](${txLink(p.txHash)})`);
       }
     }
 
     return { success: true, output: lines.join("\n") };
+  }
+
+  private async executeDeployERC8004(args: Record<string, unknown>): Promise<ToolResult> {
+    const privateKey = process.env.AGENT_PRIVATE_KEY;
+    if (!privateKey) {
+      return { success: false, output: "", error: "AGENT_PRIVATE_KEY required for ERC-8004 deployment" };
+    }
+
+    const approved = await requestApproval("deploy_erc8004", "Deploy ERC-8004 identity contracts on SKALE", args);
+    if (!approved) return { success: false, output: "", error: "Deployment not approved" };
+
+    try {
+      const { deployERC8004 } = await import(
+        "../integrations/agentic-commerce/deploy/deploy-erc8004.js"
+      );
+      const registerAgent = args.register_agent !== false;
+      const agentUri = args.agent_uri as string | undefined;
+
+      const result = await deployERC8004(privateKey as `0x${string}`, {
+        registerAgent,
+        agentURI: agentUri,
+      });
+
+      const { SKALE_BITE_SANDBOX } = await import(
+        "../integrations/agentic-commerce/config.js"
+      );
+
+      const lines = [
+        "ERC-8004 Contracts Deployed on SKALE BITE V2 (gasless):",
+        "",
+        `Factory:            ${result.factory}`,
+        `IdentityRegistry:   ${result.identityRegistry}`,
+        `ReputationRegistry: ${result.reputationRegistry}`,
+        `ValidationRegistry: ${result.validationRegistry}`,
+      ];
+
+      if (result.agentId) {
+        lines.push("", `Agent Registered: ID ${result.agentId}`);
+      }
+
+      lines.push(
+        "",
+        `Explorer: ${SKALE_BITE_SANDBOX.explorerUrl}/address/${result.factory}`,
+      );
+
+      return { success: true, output: lines.join("\n") };
+    } catch (err: any) {
+      return { success: false, output: "", error: `ERC-8004 deployment failed: ${err.message}` };
+    }
   }
 
   private executeListDirectory(args: Record<string, unknown>): ToolResult {
@@ -1260,11 +1610,10 @@ export class ToolExecutor {
     } catch (err: any) {
       // Handle permission errors with helpful message
       if (err.code === "EPERM" || err.code === "EACCES") {
-        const workspaceDir = join(this.runtimeDir, "workspace");
         return {
           success: false,
           output: "",
-          error: `Permission denied: ${path}\n\nTry using a relative path (e.g., "my-project") and I'll create it in my workspace: ${workspaceDir}`,
+          error: `Permission denied: ${path}\n\nI don't have access to this location. Try a different directory, or check folder permissions.`,
         };
       }
       return { success: false, output: "", error: err.message };
@@ -2902,8 +3251,18 @@ export default ${componentName};
             });
             log.info("npm install completed successfully");
           } catch (installErr: any) {
-            log.warn("npm install warning: " + installErr.message);
-            // Continue anyway - try to run dev server
+            const installError = (installErr.stderr || installErr.message || "").toString();
+            log.warn("npm install warning: " + installError.slice(0, 200));
+            // Self-healing: provide fix hints
+            const hint = this.detectErrorsForSelfHealing(installError);
+            if (hint && installError.toLowerCase().includes("err!")) {
+              return {
+                success: false,
+                output: `npm install failed in ${fullPath}`,
+                error: `${installError.slice(0, 2000)}\n\n[SELF-HEAL] ${hint}`,
+              };
+            }
+            // Non-fatal warnings: continue anyway
           }
         }
 
@@ -3170,6 +3529,67 @@ export default ${componentName};
     }
   }
 
+  // === x402 Audit Report ===
+
+  private async executeGenerateX402Report(args: Record<string, unknown>): Promise<ToolResult> {
+    const outputPath = String(args.outputPath || "");
+    const agentAddress = String(args.agentAddress || "");
+    const network = String(args.network || "");
+    const chainId = Number(args.chainId || 0);
+    const explorerUrl = String(args.explorerUrl || "");
+    const transactionsStr = String(args.transactions || "[]");
+    const tracksStr = String(args.tracks || "[]");
+    const totalSpent = Number(args.totalSpent || 0);
+
+    if (!outputPath || !agentAddress || !explorerUrl) {
+      return { success: false, output: "", error: "outputPath, agentAddress, and explorerUrl are required" };
+    }
+
+    try {
+      const transactions = JSON.parse(transactionsStr);
+      const tracks = JSON.parse(tracksStr);
+
+      const { join, isAbsolute } = await import("path");
+      const fullPath = isAbsolute(outputPath)
+        ? outputPath
+        : join(this.runtimeDir, "workspace", outputPath);
+
+      const { generateX402Report } = await import("../documents/x402-report.js");
+
+      const result = await generateX402Report({
+        title: args.title ? String(args.title) : undefined,
+        subtitle: args.subtitle ? String(args.subtitle) : undefined,
+        agentAddress,
+        sellerAddress: args.sellerAddress ? String(args.sellerAddress) : undefined,
+        network,
+        chainId,
+        explorerUrl,
+        totalSpent,
+        totalTransactions: transactions.length,
+        transactions,
+        tracks,
+        demoTurns: args.demoTurns ? Number(args.demoTurns) : undefined,
+        duration: args.duration ? String(args.duration) : undefined,
+        author: args.author ? String(args.author) : undefined,
+      }, fullPath);
+
+      const outputs = [`x402 Audit Report generated successfully.`];
+      outputs.push(`LaTeX source: ${result.texPath}`);
+      if (result.pdfPath) {
+        outputs.push(`PDF output: ${result.pdfPath}`);
+      } else {
+        outputs.push(`PDF compilation skipped or failed. LaTeX source is available for manual compilation.`);
+      }
+      outputs.push(`\nReport contains ${transactions.length} transactions across ${tracks.length} tracks.`);
+      outputs.push(`Total spent: $${totalSpent.toFixed(6)} USDC`);
+      outputs.push(`Network: ${network} (Chain ${chainId})`);
+
+      return { success: true, output: outputs.join("\n") };
+    } catch (err: any) {
+      return { success: false, output: "", error: `x402 report generation failed: ${err.message}` };
+    }
+  }
+
   // === Telegram Document Delivery Methods ===
 
   private async executeSendDocumentToTelegram(args: Record<string, unknown>): Promise<ToolResult> {
@@ -3187,12 +3607,26 @@ export default ${componentName};
     }
 
     try {
-      const chatId = this.currentChatContext?.chatId;
+      // Try current context first, then env var fallback for CLI usage
+      const chatId = this.currentChatContext?.chatId
+        || process.env.TELEGRAM_CHAT_ID
+        || process.env.WISPY_TELEGRAM_CHAT_ID;
       if (!chatId) {
-        return { success: false, output: "", error: "No active Telegram chat. Use this tool only in Telegram context." };
+        return { success: false, output: "", error: "No Telegram chat ID available. Set TELEGRAM_CHAT_ID environment variable to send documents from CLI, or use this tool in Telegram context." };
       }
 
-      const { sendPdf, sendDocumentWithVoice } = await import("../documents/telegram-delivery.js");
+      const { sendPdf, sendDocumentWithVoice, getTelegramBot, initTelegramDelivery } = await import("../documents/telegram-delivery.js");
+
+      // If bot not initialized but we have a token, initialize it for CLI delivery
+      if (!getTelegramBot() && process.env.TELEGRAM_BOT_TOKEN) {
+        try {
+          const { Bot } = await import("grammy");
+          const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
+          initTelegramDelivery(bot);
+        } catch {
+          // grammy may not be available
+        }
+      }
 
       if (withVoice && voiceText) {
         const success = await sendDocumentWithVoice(chatId, filePath, voiceText, { caption });
@@ -3212,6 +3646,45 @@ export default ${componentName};
       }
     } catch (err: any) {
       return { success: false, output: "", error: `Send document error: ${err.message}` };
+    }
+  }
+
+  private async executeTelegramListFiles(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      const { homedir } = await import("os");
+      const { join, basename } = await import("path");
+
+      const targetDir = String(args.directory || join(homedir(), "Downloads"));
+
+      if (!existsSync(targetDir)) {
+        return { success: false, output: "", error: `Directory not found: ${targetDir}` };
+      }
+
+      const entries = readdirSync(targetDir, { withFileTypes: true })
+        .slice(0, 50)
+        .map((e) => {
+          const icon = e.isDirectory() ? "[DIR]" : "[FILE]";
+          return `${icon} ${e.name}`;
+        });
+
+      const listing = `Directory: ${targetDir}\n\n${entries.join("\n") || "(empty)"}`;
+
+      // If sendFile is specified, also send that file as attachment
+      const sendFile = args.sendFile ? String(args.sendFile) : "";
+      if (sendFile && existsSync(sendFile)) {
+        const chatId = this.currentChatContext?.chatId
+          || process.env.TELEGRAM_CHAT_ID;
+        if (chatId) {
+          try {
+            const { sendTelegramDocument } = await import("../channels/telegram/adapter.js");
+            await sendTelegramDocument(chatId, sendFile, basename(sendFile));
+          } catch { /* non-fatal */ }
+        }
+      }
+
+      return { success: true, output: listing };
+    } catch (err: any) {
+      return { success: false, output: "", error: `List files error: ${err.message}` };
     }
   }
 
@@ -3326,7 +3799,7 @@ export default ${componentName};
       // For grant actions, we just report what would happen (actual chmod is too dangerous)
       return {
         success: true,
-        output: `Permission action '${action}' noted. In sandboxed mode, use workspace directory for full access: ${resolve(this.runtimeDir, "workspace")}`,
+        output: `Permission action '${action}' noted. Use file_write with an absolute path to write files anywhere you have access.`,
       };
     } catch (err: any) {
       return { success: false, output: "", error: `Permission check error: ${err.message}` };
@@ -4060,6 +4533,189 @@ ${newTaskContext}
     } catch (err: any) {
       return { success: false, output: "", error: `Screen recording failed: ${err.message}` };
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // WEBCAM & LIVE VISION TOOLS
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  private async executeWebcamCapture(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      const { captureFrame } = await import("../vision/webcam.js");
+      const outputDir = resolve(this.runtimeDir, "captures");
+
+      const framePath = captureFrame({
+        device: args.device ? String(args.device) : undefined,
+        width: args.width ? Number(args.width) : undefined,
+        height: args.height ? Number(args.height) : undefined,
+        outputDir,
+      });
+
+      // Send to chat if requested
+      if (args.sendToChat && this.currentChatContext?.chatId) {
+        try {
+          const { sendDocument } = await import("../documents/telegram-delivery.js");
+          await sendDocument(this.currentChatContext.chatId, framePath, {
+            caption: "Webcam capture",
+          });
+        } catch (sendErr: any) {
+          log.warn("Failed to send webcam capture to chat: %s", sendErr.message);
+        }
+      }
+
+      return {
+        success: true,
+        output: `Webcam frame captured!\nPath: ${framePath}${args.sendToChat ? "\nSent to Telegram: Yes" : ""}`,
+      };
+    } catch (err: any) {
+      return { success: false, output: "", error: `Webcam capture failed: ${err.message}` };
+    }
+  }
+
+  private async executeWebcamRecord(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      const { recordVideo } = await import("../vision/webcam.js");
+      const outputDir = resolve(this.runtimeDir, "captures");
+
+      const videoPath = recordVideo({
+        device: args.device ? String(args.device) : undefined,
+        duration: args.duration ? Number(args.duration) : undefined,
+        fps: args.fps ? Number(args.fps) : undefined,
+        outputDir,
+      });
+
+      const { statSync } = await import("fs");
+      const stats = statSync(videoPath);
+      const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+
+      // Send to chat if requested
+      if (args.sendToChat && this.currentChatContext?.chatId) {
+        try {
+          const { sendDocument } = await import("../documents/telegram-delivery.js");
+          await sendDocument(this.currentChatContext.chatId, videoPath, {
+            caption: `Webcam recording (${args.duration || 10}s)`,
+          });
+        } catch (sendErr: any) {
+          log.warn("Failed to send webcam video to chat: %s", sendErr.message);
+        }
+      }
+
+      return {
+        success: true,
+        output: `Webcam video recorded!\nPath: ${videoPath}\nDuration: ${args.duration || 10}s\nSize: ${sizeMB} MB${args.sendToChat ? "\nSent to Telegram: Yes" : ""}`,
+      };
+    } catch (err: any) {
+      return { success: false, output: "", error: `Webcam recording failed: ${err.message}` };
+    }
+  }
+
+  private async executeWebcamListDevices(): Promise<ToolResult> {
+    try {
+      const { listDevices, isFfmpegAvailable } = await import("../vision/webcam.js");
+
+      if (!isFfmpegAvailable()) {
+        return {
+          success: false,
+          output: "",
+          error: "FFmpeg not found. Install FFmpeg to use webcam features: https://ffmpeg.org/download.html",
+        };
+      }
+
+      const devices = listDevices();
+
+      if (devices.length === 0) {
+        return {
+          success: true,
+          output: "No video capture devices found. Make sure a webcam is connected.",
+        };
+      }
+
+      const lines = devices.map((d, i) =>
+        `${i + 1}. ${d.name} (ID: ${d.id}, Type: ${d.type})`
+      );
+
+      return {
+        success: true,
+        output: `Found ${devices.length} video device(s):\n${lines.join("\n")}`,
+      };
+    } catch (err: any) {
+      return { success: false, output: "", error: `Device listing failed: ${err.message}` };
+    }
+  }
+
+  private async executeWebcamLiveStart(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      // Check if already running
+      if (this.liveStream?.getStatus().running) {
+        return {
+          success: false,
+          output: "",
+          error: "A live stream is already running. Call webcam_live_stop first.",
+        };
+      }
+
+      const { LiveVisionStream } = await import("../vision/live-stream.js");
+      this.liveStream = new LiveVisionStream();
+
+      const intervalMs = args.intervalMs ? Number(args.intervalMs) : 2000;
+      const maxFrames = args.maxFrames ? Number(args.maxFrames) : 30;
+      const prompt = args.prompt ? String(args.prompt) : undefined;
+      const device = args.device ? String(args.device) : undefined;
+      const outputDir = resolve(this.runtimeDir, "captures");
+
+      // Start the stream -- onFrame sends analysis to chat or logs it
+      const chatCtx = this.currentChatContext;
+      await this.liveStream.start({
+        device,
+        intervalMs,
+        maxFrames,
+        prompt,
+        outputDir,
+        onFrame: async (analysis: string, frameIndex: number) => {
+          const msg = `[Frame ${frameIndex}] ${analysis}`;
+          log.info(msg);
+
+          // Send to Telegram if available
+          if (chatCtx?.chatId) {
+            try {
+              const { sendDocument } = await import("../documents/telegram-delivery.js");
+              // Use Telegram bot API to send text message
+              const token = process.env.TELEGRAM_BOT_TOKEN;
+              if (token) {
+                await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ chat_id: chatCtx.chatId, text: msg }),
+                });
+              }
+            } catch { /* best-effort */ }
+          }
+        },
+      });
+
+      return {
+        success: true,
+        output: `Live vision stream started!\nInterval: ${intervalMs}ms\nMax frames: ${maxFrames}\nPrompt: ${prompt || "Describe what you see"}\nDevice: ${device || "default"}`,
+      };
+    } catch (err: any) {
+      return { success: false, output: "", error: `Live stream failed: ${err.message}` };
+    }
+  }
+
+  private async executeWebcamLiveStop(): Promise<ToolResult> {
+    if (!this.liveStream) {
+      return { success: false, output: "", error: "No live stream is running." };
+    }
+
+    const status = this.liveStream.getStatus();
+    this.liveStream.stop();
+
+    const elapsed = status.startedAt ? Math.round((Date.now() - status.startedAt) / 1000) : 0;
+
+    return {
+      success: true,
+      output: `Live stream stopped.\nFrames analyzed: ${status.framesAnalyzed}\nDuration: ${elapsed}s\nLast analysis: ${status.lastAnalysis || "N/A"}`,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════

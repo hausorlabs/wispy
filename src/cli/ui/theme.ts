@@ -41,6 +41,20 @@ export interface Theme {
   panelBorder: ChalkInstance;
   panelTitle: ChalkInstance;
   highlight: ChalkInstance;
+  // Gradient color stops (hex strings for gradient-string)
+  gradient: string[];
+  gradientAccent: string[];
+  tipIcon: string;
+  boxBorder: string;
+  // Hex colors for Ink components (Ink uses hex strings, not chalk)
+  primaryHex: string;
+  accentHex: string;
+  dimHex: string;
+  highlightBgHex: string;
+  // Thinking level colors (hex for Ink)
+  thinkingLevelHex: Record<string, string>;
+  // Phase colors for marathon/background tasks
+  phaseHex: Record<string, string>;
 }
 
 const skyBlue = chalk.rgb(...SKY);
@@ -84,6 +98,22 @@ const dawn: Theme = {
   statusBarFg: chalk.rgb(200, 180, 170),
   inputBorder: chalk.rgb(255, 127, 80).dim,
   highlight: chalk.bgRgb(60, 40, 45),
+  gradient: ["#FF7F50", "#FFB74D", "#31CCFF"],
+  gradientAccent: ["#FF7F50", "#FFD54F"],
+  tipIcon: chalk.rgb(255, 127, 80)("\u2726"),
+  boxBorder: "#FF7F50",
+  primaryHex: "#FF7F50",
+  accentHex: "#FFB74D",
+  dimHex: "#8B6050",
+  highlightBgHex: "#3C282D",
+  thinkingLevelHex: {
+    none: "#555555", minimal: "#6B7280", low: "#60A5FA",
+    medium: "#FBBF24", high: "#F97316", ultra: "#EF4444",
+  },
+  phaseHex: {
+    planning: "#A78BFA", executing: "#34D399", verifying: "#60A5FA",
+    recovering: "#FBBF24", idle: "#6B7280",
+  },
 };
 
 const day: Theme = {
@@ -102,6 +132,22 @@ const day: Theme = {
   statusBarFg: chalk.rgb(180, 190, 210),
   inputBorder: chalk.rgb(49, 204, 255).dim,
   highlight: chalk.bgRgb(40, 50, 70),
+  gradient: ["#31CCFF", "#7B61FF", "#31CCFF"],
+  gradientAccent: ["#31CCFF", "#5E9FFF"],
+  tipIcon: chalk.rgb(49, 204, 255)("\u2726"),
+  boxBorder: "#31CCFF",
+  primaryHex: "#31CCFF",
+  accentHex: "#5E9FFF",
+  dimHex: "#4A7A99",
+  highlightBgHex: "#283246",
+  thinkingLevelHex: {
+    none: "#555555", minimal: "#6B7280", low: "#60A5FA",
+    medium: "#FBBF24", high: "#F97316", ultra: "#EF4444",
+  },
+  phaseHex: {
+    planning: "#A78BFA", executing: "#34D399", verifying: "#60A5FA",
+    recovering: "#FBBF24", idle: "#6B7280",
+  },
 };
 
 const dusk: Theme = {
@@ -120,6 +166,22 @@ const dusk: Theme = {
   statusBarFg: chalk.rgb(190, 170, 210),
   inputBorder: chalk.rgb(200, 100, 255).dim,
   highlight: chalk.bgRgb(50, 35, 65),
+  gradient: ["#C864FF", "#7B61FF", "#31CCFF"],
+  gradientAccent: ["#C864FF", "#FF96C8"],
+  tipIcon: chalk.rgb(200, 100, 255)("\u2726"),
+  boxBorder: "#C864FF",
+  primaryHex: "#C864FF",
+  accentHex: "#FF96C8",
+  dimHex: "#7B4D99",
+  highlightBgHex: "#322341",
+  thinkingLevelHex: {
+    none: "#555555", minimal: "#6B7280", low: "#A78BFA",
+    medium: "#FBBF24", high: "#F97316", ultra: "#EF4444",
+  },
+  phaseHex: {
+    planning: "#C084FC", executing: "#34D399", verifying: "#A78BFA",
+    recovering: "#FBBF24", idle: "#6B7280",
+  },
 };
 
 const night: Theme = {
@@ -138,6 +200,22 @@ const night: Theme = {
   statusBarFg: chalk.rgb(150, 160, 200),
   inputBorder: chalk.rgb(100, 120, 200).dim,
   highlight: chalk.bgRgb(30, 35, 55),
+  gradient: ["#6478C8", "#7B61FF", "#31CCFF"],
+  gradientAccent: ["#6478C8", "#4A5A9F"],
+  tipIcon: chalk.rgb(100, 120, 200)("\u2726"),
+  boxBorder: "#6478C8",
+  primaryHex: "#6478C8",
+  accentHex: "#4A5A9F",
+  dimHex: "#3D4A7A",
+  highlightBgHex: "#1E2337",
+  thinkingLevelHex: {
+    none: "#555555", minimal: "#6B7280", low: "#818CF8",
+    medium: "#FBBF24", high: "#F97316", ultra: "#EF4444",
+  },
+  phaseHex: {
+    planning: "#A78BFA", executing: "#34D399", verifying: "#818CF8",
+    recovering: "#FBBF24", idle: "#6B7280",
+  },
 };
 
 export const themes = { dawn, day, dusk, night } as const;

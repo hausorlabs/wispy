@@ -16,6 +16,7 @@ import {
   http,
   encodeFunctionData,
 } from "viem";
+import type { Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
   SKALE_BITE_SANDBOX,
@@ -26,9 +27,14 @@ import {
   ALGEBRA_SWAP_ROUTER_ABI,
   ALGEBRA_QUOTER_V2_ABI,
   ALGEBRA_FACTORY_ABI,
+  TOKENS,
+  resolveTokenAddress,
+  getTokenDecimals,
 } from "../config.js";
 import type { RiskEngine, TradeDecision } from "./risk-engine.js";
 import type { SpendTracker } from "../x402/tracker.js";
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -76,6 +82,7 @@ export class DeFiAgent {
   private readonly publicClient;
   private readonly walletClient;
   private readonly tradeResults: SwapResult[] = [];
+  private readonly approvedTokens = new Set<string>();
 
   constructor(
     privateKey: string,
@@ -96,6 +103,58 @@ export class DeFiAgent {
       chain: skaleBiteSandbox,
       transport: http(SKALE_BITE_SANDBOX.rpcUrl),
     });
+  }
+
+  /**
+   * Approve a token for spending by the Algebra SwapRouter.
+   * Idempotent - only approves once per token per session.
+   */
+  private async approveForSwap(tokenAddress: Address): Promise<string | null> {
+    const key = tokenAddress.toLowerCase();
+    if (this.approvedTokens.has(key)) return null;
+
+    try {
+      const maxUint = 2n ** 256n - 1n;
+      const hash = await this.walletClient.writeContract({
+        address: tokenAddress,
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [ALGEBRA_CONTRACTS.swapRouter as Address, maxUint],
+        gas: 100_000n,
+      });
+      await this.publicClient.waitForTransactionReceipt({ hash });
+      this.approvedTokens.add(key);
+      console.log(`[DeFi] Approved ${tokenAddress.slice(0, 10)}... to SwapRouter — tx: ${hash.slice(0, 16)}...`);
+      return hash;
+    } catch (err) {
+      console.error(`[DeFi] Approval failed: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Parse the actual amountOut from swap receipt Transfer events.
+   */
+  private parseSwapAmountOut(
+    receipt: { logs: Array<{ address: string; topics: string[]; data: string }> },
+    tokenOut: Address,
+    recipient: Address,
+  ): bigint {
+    // ERC20 Transfer(address,address,uint256) topic
+    const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+    for (const log of receipt.logs) {
+      if (
+        log.address.toLowerCase() === tokenOut.toLowerCase() &&
+        log.topics[0] === transferTopic
+      ) {
+        const to = "0x" + (log.topics[2] ?? "").slice(26);
+        if (to.toLowerCase() === recipient.toLowerCase()) {
+          return BigInt(log.data);
+        }
+      }
+    }
+    return 0n;
   }
 
   /**
@@ -187,11 +246,13 @@ export class DeFiAgent {
     tokenB: string,
   ): Promise<string | null> {
     try {
+      const addrA = resolveTokenAddress(tokenA);
+      const addrB = resolveTokenAddress(tokenB);
       const pool = await this.publicClient.readContract({
         address: ALGEBRA_CONTRACTS.factory as `0x${string}`,
         abi: ALGEBRA_FACTORY_ABI,
         functionName: "poolByPair",
-        args: [tokenA as `0x${string}`, tokenB as `0x${string}`],
+        args: [addrA, addrB],
       });
 
       const poolAddr = pool as string;
@@ -228,8 +289,58 @@ export class DeFiAgent {
   }
 
   /**
+   * Get a real price quote from Algebra QuoterV2 contract on-chain.
+   * Returns the amount of tokenOut you'd receive for amountIn of tokenIn.
+   */
+  async getQuote(
+    tokenIn: string,
+    tokenOut: string,
+    amountIn: bigint,
+  ): Promise<{
+    amountOut: bigint;
+    sqrtPriceX96After: bigint;
+    gasEstimate: bigint;
+    fee: number;
+  } | null> {
+    const addrIn = resolveTokenAddress(tokenIn);
+    const addrOut = resolveTokenAddress(tokenOut);
+    console.log(
+      `[DeFi] QuoterV2: quoting ${amountIn} of ${addrIn.slice(0, 10)}... -> ${addrOut.slice(0, 10)}...`,
+    );
+    try {
+      const result = await this.publicClient.readContract({
+        address: ALGEBRA_CONTRACTS.quoterV2 as `0x${string}`,
+        abi: ALGEBRA_QUOTER_V2_ABI,
+        functionName: "quoteExactInputSingle",
+        args: [
+          {
+            tokenIn: addrIn,
+            tokenOut: addrOut,
+            deployer: ZERO_ADDRESS,
+            amountIn,
+            limitSqrtPrice: 0n,
+          },
+        ],
+      });
+
+      const [amountOut, , sqrtPriceX96After, , gasEstimate, fee] =
+        result as [bigint, bigint, bigint, number, bigint, number];
+
+      console.log(
+        `[DeFi] QuoterV2 result: out=${amountOut}, fee=${fee}, gas=${gasEstimate}`,
+      );
+      return { amountOut, sqrtPriceX96After, gasEstimate, fee };
+    } catch (err) {
+      console.warn(
+        `[DeFi] QuoterV2 call failed: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Research market conditions from multiple sources.
-   * Queries the Algebra subgraph for real data, supplements with simulated feeds.
+   * Queries real on-chain data: Algebra subgraph, QuoterV2 price quotes, USDC balance.
    */
   async research(token: string): Promise<MarketResearch> {
     console.log(`[DeFi] Researching market conditions for ${token}...`);
@@ -241,22 +352,58 @@ export class DeFiAgent {
     const balance = await this.getUsdcBalance();
     console.log(`[DeFi] Agent USDC balance: $${balance.toFixed(2)}`);
 
-    // Simulated price data (in production: x402-paywalled APIs)
-    const basePrice =
-      token.toUpperCase() === "USDC" ? 1.0 : 0.5 + Math.random() * 100;
-    const sources = [
+    const sources: string[] = [
       `Algebra DEX Subgraph (${poolData.poolCount} pools)`,
-      "CoinGecko API (x402-paywalled)",
-      "DeFiLlama API (free)",
       `On-chain balance: $${balance.toFixed(2)} USDC`,
     ];
+
+    // Attempt real QuoterV2 price quote
+    let basePrice: number;
+    let quoterUsed = false;
+    const tokenUpper = token.toUpperCase();
+
+    if (tokenUpper === "USDC") {
+      basePrice = 1.0;
+    } else {
+      // Try QuoterV2 with resolved addresses (works whether pools show in subgraph or not)
+      try {
+        const tokenAddr = resolveTokenAddress(token);
+        const quote = await this.getQuote(
+          "USDC",
+          token,
+          BigInt(1_000_000), // 1 USDC in
+        );
+        if (quote && quote.amountOut > 0n) {
+          const decimalsOut = getTokenDecimals(token);
+          basePrice = 1_000_000 / (Number(quote.amountOut) / 10 ** (decimalsOut - 6));
+          quoterUsed = true;
+          sources.push(
+            `Algebra QuoterV2 (${ALGEBRA_CONTRACTS.quoterV2.slice(0, 10)}...) — real on-chain quote`,
+          );
+        } else {
+          // QuoterV2 returned 0 or null -- pool may lack liquidity
+          basePrice = 1.0;
+          sources.push("QuoterV2 returned no quote — pool may lack liquidity");
+        }
+      } catch {
+        // Unknown token or contract call failed
+        basePrice = 1.0;
+        sources.push("QuoterV2 call failed — using default price");
+      }
+    }
+
+    if (!quoterUsed) {
+      sources.push("CoinGecko API (x402-paywalled) — not called in demo");
+    }
 
     const change24h = -5 + Math.random() * 10;
     const volume = 100_000 + Math.random() * 10_000_000;
 
     let recommendation: string;
-    if (poolData.poolCount > 0) {
-      recommendation = `Active Algebra pools available. DEX swap recommended via SwapRouter at ${ALGEBRA_CONTRACTS.swapRouter.slice(0, 10)}...`;
+    if (poolData.poolCount > 0 && quoterUsed) {
+      recommendation = `Active Algebra pools available. Real QuoterV2 quote obtained. DEX swap recommended via SwapRouter at ${ALGEBRA_CONTRACTS.swapRouter.slice(0, 10)}...`;
+    } else if (poolData.poolCount > 0) {
+      recommendation = `Active Algebra pools found but QuoterV2 returned no quote. DEX swap may work — try SwapRouter.`;
     } else if (change24h > 3) {
       recommendation =
         "No DEX pools active. Strong upward trend — direct USDC operations.";
@@ -339,52 +486,85 @@ export class DeFiAgent {
       `[DeFi] Risk approved (score: ${decision.riskScore}/100). Executing...`,
     );
 
-    // Try Algebra DEX swap if pools exist
-    if (research.poolData && research.poolData.poolCount > 0) {
-      return this.executeAlgebraSwap(params, research, decision);
+    // Always attempt Algebra DEX swap first -- check if pool exists for the pair
+    try {
+      const pool = await this.checkPool(params.fromToken, params.toToken);
+      if (pool) {
+        console.log(`[DeFi] Pool found: ${pool}. Routing via Algebra SwapRouter.`);
+        return this.executeAlgebraSwap(params, research, decision);
+      }
+    } catch {
+      // checkPool failed, try swap anyway (SwapRouter will revert if no pool)
     }
 
-    // Fallback: direct USDC transfer (demonstrates on-chain execution)
-    return this.executeDirectTransfer(params, research, decision);
+    // Try swap even without subgraph confirmation (pool may exist but subgraph is stale)
+    console.log("[DeFi] No pool confirmed via factory. Attempting SwapRouter anyway...");
+    return this.executeAlgebraSwap(params, research, decision);
   }
 
   /**
    * Execute swap via Algebra DEX SwapRouter.
+   * Resolves token symbols to contract addresses, approves spending, and
+   * parses real amountOut from on-chain Transfer events.
    */
   private async executeAlgebraSwap(
     params: { fromToken: string; toToken: string; amount: string; reasoning: string },
-    research: MarketResearch,
+    _research: MarketResearch,
     decision: TradeDecision,
   ): Promise<SwapResult> {
     console.log("[DeFi] Executing via Algebra DEX SwapRouter...");
 
     try {
-      const amountIn = BigInt(
-        Math.round(parseFloat(params.amount) * 1_000_000),
-      );
-      const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+      // Resolve token symbols to real contract addresses
+      const tokenInAddr = resolveTokenAddress(params.fromToken);
+      const tokenOutAddr = resolveTokenAddress(params.toToken);
+      const decimalsIn = getTokenDecimals(params.fromToken);
+      const decimalsOut = getTokenDecimals(params.toToken);
 
+      console.log(`[DeFi] tokenIn:  ${params.fromToken} -> ${tokenInAddr}`);
+      console.log(`[DeFi] tokenOut: ${params.toToken} -> ${tokenOutAddr}`);
+
+      const amountIn = BigInt(
+        Math.round(parseFloat(params.amount) * 10 ** decimalsIn),
+      );
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+      // Approve tokenIn for SwapRouter (idempotent)
+      await this.approveForSwap(tokenInAddr);
+
+      // Execute the real swap on Algebra SwapRouter
       const txHash = await this.walletClient.writeContract({
-        address: ALGEBRA_CONTRACTS.swapRouter as `0x${string}`,
+        address: ALGEBRA_CONTRACTS.swapRouter as Address,
         abi: ALGEBRA_SWAP_ROUTER_ABI,
         functionName: "exactInputSingle",
         args: [
           {
-            tokenIn: SKALE_BITE_SANDBOX.usdc as `0x${string}`,
-            tokenOut: params.toToken as `0x${string}`,
-            deployer: ALGEBRA_CONTRACTS.poolDeployer as `0x${string}`,
+            tokenIn: tokenInAddr,
+            tokenOut: tokenOutAddr,
+            deployer: ZERO_ADDRESS,
             recipient: this.account.address,
             deadline,
             amountIn,
-            amountOutMinimum: 0n, // Accept any amount for demo
+            amountOutMinimum: 0n,
             limitSqrtPrice: 0n,
           },
         ],
+        gas: 12_000_000n, // Algebra plugin hooks need ~8M gas
       });
 
       const receipt = await this.publicClient.waitForTransactionReceipt({
         hash: txHash,
       });
+
+      // Parse real amountOut from Transfer events
+      const amountOutRaw = this.parseSwapAmountOut(
+        receipt as any,
+        tokenOutAddr,
+        this.account.address as Address,
+      );
+      const amountOutFormatted = (Number(amountOutRaw) / 10 ** decimalsOut).toFixed(
+        decimalsOut > 8 ? 8 : decimalsOut,
+      );
 
       const result: SwapResult = {
         success: receipt.status === "success",
@@ -392,7 +572,7 @@ export class DeFiAgent {
         fromToken: params.fromToken,
         toToken: params.toToken,
         amountIn: params.amount,
-        amountOut: (parseFloat(params.amount) / research.price).toFixed(6),
+        amountOut: amountOutFormatted,
         slippage: 0.5,
         gasUsed: receipt.gasUsed.toString(),
         decision,
@@ -411,13 +591,15 @@ export class DeFiAgent {
         reason: `Algebra swap: ${params.reasoning}`,
       });
 
-      console.log(`[DeFi] Algebra swap complete: tx=${txHash.slice(0, 16)}...`);
+      console.log(
+        `[DeFi] Algebra swap complete: ${params.amount} ${params.fromToken} -> ${amountOutFormatted} ${params.toToken}  tx=${txHash.slice(0, 16)}...`,
+      );
       return result;
     } catch (err) {
       console.warn(
-        `[DeFi] Algebra swap failed: ${(err as Error).message}. Falling back.`,
+        `[DeFi] Algebra swap failed: ${(err as Error).message}. Falling back to direct transfer.`,
       );
-      return this.executeDirectTransfer(params, research, decision);
+      return this.executeDirectTransfer(params, _research, decision);
     }
   }
 
@@ -501,29 +683,43 @@ export class DeFiAgent {
 
   /** Get formatted trade log with all decisions */
   getTradeLog(): string {
+    const executed = this.tradeResults.filter((r) => r.success).length;
+    const denied = this.tradeResults.filter((r) => !r.success).length;
+
     const lines: string[] = [
-      `## DeFi Agent Trade Log`,
+      `━━━ DeFi Agent Trade Log ━━━`,
       ``,
-      `**Agent:** \`${this.account.address}\``,
-      `**Trades executed:** ${this.tradeResults.filter((r) => r.success).length}`,
-      `**Trades denied:** ${this.tradeResults.filter((r) => !r.success).length}`,
-      `**Network:** SKALE BITE V2 Sandbox (Chain ${SKALE_BITE_SANDBOX.chainId})`,
-      `**DEX:** Algebra Integral v1.2.2 (SwapRouter: \`${ALGEBRA_CONTRACTS.swapRouter.slice(0, 10)}...\`)`,
+      `  Agent:    ${this.account.address}`,
+      `  Executed: ${executed}  Denied: ${denied}`,
+      `  Network:  SKALE BITE V2 Sandbox (Chain ${SKALE_BITE_SANDBOX.chainId})`,
+      `  DEX:      Algebra Integral v1.2.2 (${ALGEBRA_CONTRACTS.swapRouter.slice(0, 12)}...)`,
       ``,
       this.riskEngine.formatTradeLog(),
       ``,
-      `### Execution Results`,
-      `| # | From | To | Amount In | Amount Out | Method | Tx Hash | Status |`,
-      `|---|------|----|-----------|------------|--------|---------|--------|`,
+      `  ┌─ Execution Results ──────────────────`,
     ];
 
+    if (this.tradeResults.length === 0) {
+      lines.push(`  │ (no trades executed)`);
+    }
     for (let i = 0; i < this.tradeResults.length; i++) {
       const r = this.tradeResults[i];
-      const hash = r.txHash ? `\`${r.txHash.slice(0, 12)}...\`` : "N/A";
+      const isLast = i === this.tradeResults.length - 1;
+      const c = isLast ? "╰" : "├";
+      const status = r.success ? "OK" : "FAILED";
       lines.push(
-        `| ${i + 1} | ${r.fromToken} | ${r.toToken} | $${r.amountIn} | ${r.amountOut ?? "N/A"} | ${r.method} | ${hash} | ${r.success ? "OK" : "FAILED"} |`,
+        `  ${c}─ #${i + 1} ${r.fromToken} -> ${r.toToken}  $${r.amountIn} in / ${r.amountOut ?? "N/A"} out  [${status}]`,
       );
+      if (r.txHash) {
+        lines.push(
+          `  ${isLast ? " " : "│"}    tx: ${r.txHash.slice(0, 16)}...  method: ${r.method}`,
+          `  ${isLast ? " " : "│"}    ${SKALE_BITE_SANDBOX.explorerUrl}/tx/${r.txHash}`,
+        );
+      } else if (r.error) {
+        lines.push(`  ${isLast ? " " : "│"}    ${r.error.slice(0, 60)}`);
+      }
     }
+    lines.push(`  └────────────────────────────────────`);
 
     return lines.join("\n");
   }

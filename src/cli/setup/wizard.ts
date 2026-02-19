@@ -3,17 +3,21 @@
  *
  * Steps:
  * 1. Welcome screen with ASCII art
- * 2. API key configuration
+ * 2. API key configuration (+ Telegram, Autonomous Mode)
  * 3. Theme selection
  * 4. Agent selection
  * 5. Integration selection
- * 6. Summary
+ * 6. MCP Servers
+ * 7. x402 Agentic Commerce
+ * 8. Voice/TTS
+ * 9. Summary
  */
 
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
 import chalk from "chalk";
+import gradient from "gradient-string";
 import { writeYAML } from "../../utils/file.js";
 
 // ── Brand color ──────────────────────────────────────────
@@ -24,15 +28,17 @@ const bold = chalk.bold;
 const green = chalk.green;
 const yellowBright = chalk.yellowBright;
 
-// ── ASCII Art ────────────────────────────────────────────
-const WISPY_ASCII = `
-  ${sky("██╗    ██╗ ██╗ ███████╗ ██████╗  ██╗   ██╗")}
-  ${sky("██║    ██║ ██║ ██╔════╝ ██╔══██╗ ╚██╗ ██╔╝")}
-  ${sky("██║ █╗ ██║ ██║ ███████╗ ██████╔╝  ╚████╔╝ ")}
-  ${sky("██║███╗██║ ██║ ╚════██║ ██╔═══╝    ╚██╔╝  ")}
-  ${sky("╚███╔███╔╝ ██║ ███████║ ██║         ██║   ")}
-  ${sky(" ╚══╝╚══╝  ╚═╝ ╚══════╝ ╚═╝         ╚═╝   ")}
-`;
+// ── ASCII Art (gradient block letters) ───────────────────
+const WISPY_ASCII_RAW = [
+  "\u2588\u2588\u2557    \u2588\u2588\u2557 \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2557   \u2588\u2588\u2557",
+  "\u2588\u2588\u2551    \u2588\u2588\u2551 \u2588\u2588\u2551 \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557 \u255A\u2588\u2588\u2557 \u2588\u2588\u2554\u255D",
+  "\u2588\u2588\u2551 \u2588\u2557 \u2588\u2588\u2551 \u2588\u2588\u2551 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D  \u255A\u2588\u2588\u2588\u2588\u2554\u255D ",
+  "\u2588\u2588\u2551\u2588\u2588\u2588\u2557\u2588\u2588\u2551 \u2588\u2588\u2551 \u255A\u2550\u2550\u2550\u2550\u2588\u2588\u2551 \u2588\u2588\u2554\u2550\u2550\u2550\u255D    \u255A\u2588\u2588\u2554\u255D  ",
+  "\u255A\u2588\u2588\u2588\u2554\u2588\u2588\u2588\u2554\u255D \u2588\u2588\u2551 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551 \u2588\u2588\u2551         \u2588\u2588\u2551   ",
+  " \u255A\u2550\u2550\u255D\u255A\u2550\u2550\u255D  \u255A\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u255D         \u255A\u2550\u255D   ",
+];
+const wizardGradient = gradient(["#31CCFF", "#7B61FF", "#31CCFF"]);
+const WISPY_ASCII = "\n" + WISPY_ASCII_RAW.map(line => `  ${wizardGradient(line)}`).join("\n") + "\n";
 
 // ── Theme definitions ────────────────────────────────────
 const THEMES = [
@@ -71,6 +77,11 @@ const INTEGRATIONS = [
   { id: "notion", label: "Notion" },
   { id: "slack", label: "Slack" },
   { id: "spotify", label: "Spotify" },
+  { id: "zoho-email", label: "Zoho Mail" },
+  { id: "anthropic", label: "Anthropic (Claude)" },
+  { id: "groq", label: "Groq" },
+  { id: "openrouter", label: "OpenRouter" },
+  { id: "kimi", label: "Kimi (Moonshot)" },
 ];
 
 // ── Helpers ──────────────────────────────────────────────
@@ -132,21 +143,27 @@ export async function runSetupWizard(opts: {
     console.log(WISPY_ASCII);
     console.log(skyBold(`  ${chalk.rgb(49,204,255)("*")} Welcome to Wispy!\n`));
     console.log(dim("  Wispy is your autonomous AI agent powered by Google Gemini."));
-    console.log(dim("  Let's get you set up in a few steps.\n"));
-    await ask(rl, dim("  Press Enter to continue..."));
+    console.log(dim("  This wizard will walk you through setup step by step.\n"));
+    console.log(dim("  You will need:"));
+    console.log(`  ${sky("1.")} A Gemini API key ${dim("(free at aistudio.google.com/apikey)")}`);
+    console.log(`  ${sky("2.")} ${dim("Optional:")} A Telegram bot token ${dim("(from @BotFather on Telegram)")}`);
+    console.log(`  ${sky("3.")} ${dim("Optional:")} An Ethereum wallet key ${dim("(for x402 payments)")}`);
+    console.log("");
+    console.log(dim("  Everything else has smart defaults. You can change settings later.\n"));
+    await ask(rl, dim("  Press Enter to start..."));
 
     // ── Step 2: API Key ──────────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.yellow("▸")} AI Configuration\n`));
-    console.log(dim("  Choose how to connect to Google's AI:"));
+    console.log(skyBold(`  ${chalk.yellow("▸")} Step 1 of 4: AI Configuration\n`));
+    console.log(dim("  Wispy needs a Google Gemini API key to think and reason.\n"));
+    console.log(`  ${sky("1)")} ${bold("Gemini API Key")} ${dim("(Recommended)")}`);
+    console.log(dim(`     Free to start. Go to this link and click "Create API key":`));
+    console.log(`     ${sky("https://aistudio.google.com/apikey")}`);
     console.log("");
-    console.log(`  ${sky("1)")} ${bold("Gemini API Key")} ${dim("(Free tier: 20 req/day)")}`);
-    console.log(dim(`     Get one free: ${sky("https://aistudio.google.com/apikey")}`));
-    console.log("");
-    console.log(`  ${sky("2)")} ${bold("Vertex AI")} ${dim("(Higher quotas: 300+ req/min)")}`);
-    console.log(dim(`     Requires Google Cloud project with billing enabled`));
-    console.log(dim(`     Setup: ${sky("https://cloud.google.com/vertex-ai/generative-ai/docs/start/quickstarts/quickstart-multimodal")}`));
+    console.log(`  ${sky("2)")} ${bold("Vertex AI")} ${dim("(For production / higher quotas)")}`);
+    console.log(dim(`     Needs a Google Cloud project with billing.`));
+    console.log(dim(`     Only choose this if you already have a GCP account.`));
     console.log("");
 
     const existingKey = process.env.GEMINI_API_KEY;
@@ -187,10 +204,13 @@ export async function runSetupWizard(opts: {
         }
       } else {
         console.log("");
-        console.log(dim("  Get your free API key:"));
-        console.log(`  ${sky("→ https://aistudio.google.com/apikey")}`);
+        console.log(dim("  How to get your key:"));
+        console.log(`  ${sky("1.")} Open ${sky("https://aistudio.google.com/apikey")}`);
+        console.log(`  ${sky("2.")} Sign in with your Google account`);
+        console.log(`  ${sky("3.")} Click ${bold("\"Create API key\"")}`);
+        console.log(`  ${sky("4.")} Copy the key (starts with ${bold("AIza")}...)`);
         console.log("");
-        apiKey = await ask(rl, sky("  Enter your Gemini API key: "));
+        apiKey = await ask(rl, sky("  Paste your Gemini API key here: "));
         apiKey = apiKey.trim();
 
         if (apiKey && !apiKey.startsWith("AIza")) {
@@ -209,13 +229,16 @@ export async function runSetupWizard(opts: {
     // ── Step 2b: Telegram Bot Token (optional) ──────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.blue("▸")} Telegram Bot Setup\n`));
-    console.log(dim("  Connect a Telegram bot to chat with Wispy from your phone!"));
-    console.log(dim("  Create code, monitor projects, and control your agent remotely.\n"));
-    console.log(dim("  How to create a Telegram bot:"));
-    console.log(`  ${sky("1)")} Message ${bold("@BotFather")} on Telegram`);
-    console.log(`  ${sky("2)")} Send ${sky("/newbot")} and follow the prompts`);
-    console.log(`  ${sky("3)")} Copy the bot token (looks like: 123456:ABC-DEF1234...)`);
+    console.log(skyBold(`  ${chalk.blue("▸")} Step 2 of 4: Telegram Bot (Optional)\n`));
+    console.log(dim("  Connect Telegram to chat with Wispy from your phone."));
+    console.log(dim("  Skip this if you only want to use the terminal.\n"));
+    console.log(dim("  How to create a Telegram bot (takes 1 minute):"));
+    console.log(`  ${sky("1.")} Open Telegram and search for ${bold("@BotFather")}`);
+    console.log(`  ${sky("2.")} Send the message: ${sky("/newbot")}`);
+    console.log(`  ${sky("3.")} Choose a name for your bot (e.g. "My Wispy")`);
+    console.log(`  ${sky("4.")} Choose a username (e.g. "my_wispy_bot")`);
+    console.log(`  ${sky("5.")} BotFather will reply with a ${bold("token")} like: ${dim("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")}`);
+    console.log(`  ${sky("6.")} Copy that token`);
     console.log("");
 
     const existingTelegramToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -226,7 +249,7 @@ export async function runSetupWizard(opts: {
       console.log(green(`  ✓ Found existing token: ${masked}\n`));
       telegramToken = existingTelegramToken;
     } else {
-      telegramToken = await ask(rl, sky("  Enter Telegram bot token (or press Enter to skip): "));
+      telegramToken = await ask(rl, sky("  Paste your bot token here (or press Enter to skip): "));
       telegramToken = telegramToken.trim();
 
       if (!telegramToken) {
@@ -237,23 +260,40 @@ export async function runSetupWizard(opts: {
     // ── Step 2c: Autonomous Mode ──────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.yellow("▸")} Autonomous Mode\n`));
-    console.log(dim("  Wispy can run in two modes:\n"));
-    console.log(`  ${sky("1)")} ${bold("Standard Mode")} ${dim("(Safe)")}`);
-    console.log(dim("     Requires approval for file writes, code execution, etc."));
-    console.log(dim("     Best for: Production, shared environments, safety-first\n"));
-    console.log(`  ${sky("2)")} ${bold("Autonomous Mode")} ${dim("(Recommended for Development)")}`);
-    console.log(dim("     Auto-approves file operations, bash, browser automation"));
-    console.log(dim("     Best for: Local development, coding assistance, hackathons"));
-    console.log(dim("     ⚡ Like OpenClaw - create code and projects via Telegram\n"));
+    console.log(skyBold(`  ${chalk.yellow("▸")} Step 3 of 4: How Should Wispy Work?\n`));
+    console.log(dim("  Choose how much freedom Wispy gets:\n"));
+    console.log(`  ${sky("1)")} ${bold("Standard Mode")} ${dim("(Ask before acting)")}`);
+    console.log(dim("     Wispy will ask your permission before writing files or running code."));
+    console.log(dim("     Best for: Beginners, shared computers, production servers.\n"));
+    console.log(`  ${sky("2)")} ${bold("Autonomous Mode")} ${dim("(Recommended)")}`);
+    console.log(dim("     Wispy acts on its own -- writes files, runs code, creates projects."));
+    console.log(dim("     Best for: Personal computer, development, getting things done fast.\n"));
 
     const modeChoice = await ask(rl, sky("  Select [1/2] (default: 2 for Autonomous): "));
     const autonomousMode = modeChoice.trim() !== "1";
 
+    // ── Step 2d: File System Access ──────────────────────
+    let fullFilesystemAccess = false;
+    if (autonomousMode) {
+      console.clear();
+      console.log(WISPY_ASCII);
+      console.log(skyBold(`  ${chalk.yellow("▸")} File System Access\n`));
+      console.log(dim("  Autonomous mode is enabled. Wispy can already write files in its workspace."));
+      console.log(dim("  Enable full filesystem access to let Wispy work on projects anywhere.\n"));
+      console.log(`  ${sky("Examples:")}`);
+      console.log(dim("  - Edit files across your projects directories"));
+      console.log(dim("  - Read/write anywhere on your drive"));
+      console.log(dim("  - Manage files in your Downloads folder\n"));
+
+      const fsChoice = await ask(rl, sky("  Enable full filesystem access? [Y/n]: "));
+      fullFilesystemAccess = !fsChoice.trim().toLowerCase().startsWith("n");
+    }
+
     // ── Step 3: Theme ────────────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.magenta("▸")} Choose your theme\n`));
+    console.log(skyBold(`  ${chalk.magenta("▸")} Pick a Color Theme\n`));
+    console.log(dim("  This changes how Wispy looks in your terminal.\n"));
 
     for (let i = 0; i < THEMES.length; i++) {
       const num = sky(`${i + 1})`);
@@ -270,8 +310,9 @@ export async function runSetupWizard(opts: {
     // ── Step 4: Agents ───────────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.cyan("▸")} Select your agents\n`));
-    console.log(dim("  Choose which AI agents you want active:\n"));
+    console.log(skyBold(`  ${chalk.cyan("▸")} Choose Agent Roles\n`));
+    console.log(dim("  These are Wispy's specializations. Coder + Researcher are pre-selected."));
+    console.log(dim("  Just press Enter to keep the defaults, or pick more.\n"));
 
     for (let i = 0; i < AGENTS.length; i++) {
       const mark = AGENTS[i].defaultOn ? green("[x]") : dim("[ ]");
@@ -294,8 +335,9 @@ export async function runSetupWizard(opts: {
     // ── Step 5: Integrations ─────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.blue("▸")} Connect integrations (optional)\n`));
-    console.log(dim("  You can enable these later with 'wispy integrations enable <id>'\n"));
+    console.log(skyBold(`  ${chalk.blue("▸")} Connect Apps (Optional)\n`));
+    console.log(dim("  Connect Wispy to services you use. Skip for now if unsure."));
+    console.log(dim("  You can always enable these later: wispy integrations enable <name>\n"));
 
     // Display in two columns
     const half = Math.ceil(INTEGRATIONS.length / 2);
@@ -322,9 +364,9 @@ export async function runSetupWizard(opts: {
     // ── Step 6: MCP Servers ─────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.green("▸")} MCP Servers (Model Context Protocol)\n`));
-    console.log(dim("  MCP servers extend Wispy's capabilities with external tools."));
-    console.log(dim("  These let Wispy interact with your file system, web, and more.\n"));
+    console.log(skyBold(`  ${chalk.green("▸")} Extra Tools (MCP Servers)\n`));
+    console.log(dim("  These give Wispy extra abilities like reading files or browsing the web."));
+    console.log(dim("  The defaults (File System + Web Fetch) are recommended. Just press Enter.\n"));
 
     const MCP_SERVERS = [
       {
@@ -397,12 +439,114 @@ export async function runSetupWizard(opts: {
         : MCP_SERVERS.filter((m) => m.default);
     }
 
-    // ── Step 7: Voice/TTS Setup (Edge TTS) ─────────────
+    // ── Step 7: x402 Agentic Commerce ──────────────────
     console.clear();
     console.log(WISPY_ASCII);
-    console.log(skyBold(`  ${chalk.hex('#FF6B6B')("▸")} Voice Setup (Natural TTS)\n`));
-    console.log(dim("  Enable natural text-to-speech for voice messages in Telegram."));
-    console.log(dim("  Using Microsoft Edge TTS - free, fast, and sounds very natural.\n"));
+    console.log(skyBold(`  ${chalk.hex('#00FFA3')("▸")} Step 4 of 4: Blockchain Wallet (Optional)\n`));
+    console.log(dim("  Give Wispy a wallet so it can pay for services automatically."));
+    console.log(dim("  Uses USDC on SKALE (gasless -- no transaction fees).\n"));
+    console.log(dim("  What this enables:"));
+    console.log(`  ${chalk.hex('#00FFA3')("•")} Agent pays for APIs on its own (micro-payments)`);
+    console.log(`  ${chalk.hex('#00FFA3')("•")} DeFi trading with built-in risk controls`);
+    console.log(`  ${chalk.hex('#00FFA3')("•")} Encrypted conditional payments (BITE v2)`);
+    console.log("");
+    console.log(dim("  Skip this if you just want to use Wispy for chat and coding.\n"));
+
+    const existingAgentKey = process.env.AGENT_PRIVATE_KEY;
+    let agentPrivateKey = "";
+    let commerceEnabled = false;
+
+    if (existingAgentKey) {
+      const masked = existingAgentKey.slice(0, 6) + "..." + existingAgentKey.slice(-4);
+      console.log(green(`  ✓ Found wallet key: ${masked}\n`));
+      agentPrivateKey = existingAgentKey;
+      commerceEnabled = true;
+    } else {
+      const enableChoice = await ask(rl, sky("  Enable x402 commerce? [Y/n]: "));
+
+      if (!enableChoice.trim() || enableChoice.trim().toLowerCase().startsWith("y")) {
+        console.log("");
+        console.log(`  ${sky("1)")} ${bold("Generate a new wallet")} ${dim("(Recommended -- creates one for you)")}`);
+        console.log(`  ${sky("2)")} ${bold("Use an existing wallet")} ${dim("(Paste your private key)")}`);
+        console.log("");
+
+        const keyChoice = await ask(rl, sky("  Select [1/2] (default: 1): "));
+
+        if (keyChoice.trim() === "2") {
+          const keyInput = await ask(rl, sky("  Enter private key (0x...): "));
+          agentPrivateKey = keyInput.trim();
+          if (agentPrivateKey && !agentPrivateKey.startsWith("0x")) {
+            agentPrivateKey = "0x" + agentPrivateKey;
+          }
+        } else {
+          // Generate a new wallet with recovery phrase
+          try {
+            const { ethers } = await import("ethers");
+            const wallet = ethers.Wallet.createRandom();
+            agentPrivateKey = wallet.privateKey;
+            const mnemonic = wallet.mnemonic?.phrase || "";
+            console.log("");
+            console.log(green(`  ✓ Generated new wallet!\n`));
+            console.log(`  ${dim("Address:")} ${sky(wallet.address)}`);
+            if (mnemonic) {
+              console.log("");
+              console.log(yellowBright(`  ┌─────────────────────────────────────────────────┐`));
+              console.log(yellowBright(`  │  RECOVERY PHRASE — Write this down on paper!    │`));
+              console.log(yellowBright(`  └─────────────────────────────────────────────────┘`));
+              console.log("");
+              const words = mnemonic.split(" ");
+              for (let i = 0; i < words.length; i += 3) {
+                const row = words.slice(i, i + 3).map((w, j) => {
+                  const num = String(i + j + 1).padStart(2, " ");
+                  return `${dim(num + ".")} ${bold(w.padEnd(10))}`;
+                }).join("  ");
+                console.log(`    ${row}`);
+              }
+              console.log("");
+              console.log(yellowBright("  ⚠ This is the ONLY time you will see this phrase."));
+              console.log(dim("    You can recover your wallet with these 12 words."));
+              console.log(dim("    Never share them. Never type them online.\n"));
+              await ask(rl, dim("  Press Enter once you have saved your recovery phrase..."));
+            }
+          } catch {
+            console.log(yellowBright("  ⚠ Could not generate wallet."));
+            console.log(dim("  Add AGENT_PRIVATE_KEY=0x... to .env manually.\n"));
+          }
+        }
+
+        if (agentPrivateKey) {
+          commerceEnabled = true;
+        }
+      } else {
+        console.log(dim("\n  Skipped. Enable later by adding AGENT_PRIVATE_KEY to .env\n"));
+      }
+    }
+
+    // Optional CDP wallet (advanced)
+    let cdpKeyName = process.env.CDP_API_KEY_NAME || "";
+    let cdpPrivateKey = process.env.CDP_PRIVATE_KEY || "";
+
+    if (commerceEnabled && !cdpKeyName) {
+      console.log("");
+      console.log(dim("  Optional: Coinbase Developer Platform (CDP) wallet"));
+      console.log(dim("  Provides custodial wallet management. Skip if unsure.\n"));
+      const cdpChoice = await ask(rl, sky("  Configure CDP wallet? [y/N]: "));
+
+      if (cdpChoice.trim().toLowerCase().startsWith("y")) {
+        console.log(dim("\n  Get credentials at: https://portal.cdp.coinbase.com/\n"));
+        cdpKeyName = (await ask(rl, sky("  CDP API Key Name: "))).trim();
+        cdpPrivateKey = (await ask(rl, sky("  CDP Private Key: "))).trim();
+      }
+    }
+
+    await ask(rl, dim("\n  Press Enter to continue..."));
+
+    // ── Step 8: Voice/TTS Setup (Edge TTS) ─────────────
+    console.clear();
+    console.log(WISPY_ASCII);
+    console.log(skyBold(`  ${chalk.hex('#FF6B6B')("▸")} Voice (Optional)\n`));
+    console.log(dim("  Let Wispy speak responses aloud in Telegram voice messages."));
+    console.log(dim("  Uses Edge TTS -- free, fast, and natural-sounding.\n"));
     console.log(`  ${chalk.hex('#FF6B6B')("Features:")}`);
     console.log(`  ${sky("•")} Multiple natural voices (male/female, various accents)`);
     console.log(`  ${sky("•")} Fast generation (2-3 seconds)`);
@@ -518,8 +662,8 @@ export async function runSetupWizard(opts: {
       agent: { name: "wispy", id: "main" },
       gemini: {
         models: {
-          pro: "gemini-2.5-flash",
-          flash: "gemini-2.5-flash",
+          pro: "gemini-2.5-pro-preview-05-06",
+          flash: "gemini-2.5-flash-preview-05-20",
           image: "gemini-2.0-flash",
           embedding: "text-embedding-004",
         },
@@ -531,9 +675,9 @@ export async function runSetupWizard(opts: {
         whatsapp: { enabled: false },
       },
       browser: { enabled: true },
-      wallet: { enabled: false, chain: "base-sepolia" },
+      wallet: { enabled: commerceEnabled, chain: "skale-bite-sandbox" },
       memory: { embeddingDimensions: 768, heartbeatIntervalMinutes: 30, hybridSearch: true },
-      security: { requireApprovalForExternal: !autonomousMode, allowedGroups: [] as string[], autonomousMode },
+      security: { requireApprovalForExternal: !autonomousMode, allowedGroups: [] as string[], autonomousMode, fullFilesystemAccess },
       thinking: { defaultLevel: "medium", costAware: true },
       theme: selectedTheme,
       agents: selectedAgents,
@@ -578,12 +722,25 @@ export async function runSetupWizard(opts: {
       }
     }
 
+    // Add x402 commerce keys
+    if (agentPrivateKey && !existingAgentKey) {
+      if (!envContent.includes("AGENT_PRIVATE_KEY=")) {
+        envContent += `\n\n# x402 Agentic Commerce\nAGENT_PRIVATE_KEY=${agentPrivateKey}`;
+      }
+    }
+    if (cdpKeyName && !envContent.includes("CDP_API_KEY_NAME=")) {
+      envContent += `\nCDP_API_KEY_NAME=${cdpKeyName}`;
+    }
+    if (cdpPrivateKey && !envContent.includes("CDP_PRIVATE_KEY=")) {
+      envContent += `\nCDP_PRIVATE_KEY=${cdpPrivateKey}`;
+    }
+
     // Write .env if we have content
     if (envContent.trim()) {
       fs.writeFileSync(envPath, envContent.trim() + "\n");
     }
 
-    // ── Step 7: Summary ──────────────────────────────────
+    // ── Step 9: Summary ──────────────────────────────────
     console.clear();
     console.log(WISPY_ASCII);
     console.log(skyBold(`  ${chalk.green("✓")} Setup complete!\n`));
@@ -613,11 +770,21 @@ export async function runSetupWizard(opts: {
           ? green("✓ Edge TTS") + dim(" (natural voice)")
           : dim("Not installed"));
 
+    const commerceDisplay = commerceEnabled
+      ? green("✓ Enabled") + dim(` (${cdpKeyName ? "CDP wallet" : "raw key"})`)
+      : dim("Not configured");
+
+    const fsDisplay = fullFilesystemAccess
+      ? chalk.yellow("⚡ Full Access") + dim(" (entire drive)")
+      : dim("Workspace only");
+
     console.log(`  ${dim("AI Provider:")}  ${aiDisplay}`);
     console.log(`  ${dim("Mode:")}         ${modeDisplay}`);
+    console.log(`  ${dim("File System:")}  ${fsDisplay}`);
     console.log(`  ${dim("Theme:")}        ${themeDisplay}`);
     console.log(`  ${dim("Agents:")}       ${agentsDisplay}`);
     console.log(`  ${dim("Telegram:")}     ${telegramDisplay}`);
+    console.log(`  ${dim("x402 Commerce:")} ${commerceDisplay}`);
     console.log(`  ${dim("Voice:")}        ${voiceDisplay}`);
     console.log(`  ${dim("MCP Servers:")}  ${mcpDisplay}`);
     console.log(`  ${dim("Integrations:")} ${intDisplay}`);
@@ -625,18 +792,21 @@ export async function runSetupWizard(opts: {
 
     if (!apiKey && !useVertexAI) {
       console.log(yellowBright("  ⚠ No AI credentials configured!"));
-      console.log(dim("  Add to .env: GEMINI_API_KEY=your-key-here"));
+      console.log(dim("  To fix: add GEMINI_API_KEY=your-key-here to the .env file"));
+      console.log(dim(`  Get a free key: ${sky("https://aistudio.google.com/apikey")}`));
       console.log("");
     }
 
-    console.log(`  Run ${sky("'wispy gateway'")} to start the server!`);
-    console.log(`  Or  ${sky("'wispy chat'")} for interactive CLI mode.`);
+    console.log(skyBold("  What to do next:\n"));
+    console.log(`  ${sky("wispy chat")}             Start chatting with Wispy`);
+    console.log(`  ${sky("wispy gateway")}          Start the server (Telegram + REST + Web)`);
+    console.log(`  ${sky("wispy doctor")}           Check if everything is working`);
+    console.log(`  ${sky("wispy onboard")}          Re-run this wizard anytime`);
     console.log("");
-    console.log(dim("  Helpful links:"));
-    console.log(dim(`  • Get API Key: ${sky("https://aistudio.google.com/apikey")}`));
-    console.log(dim(`  • Vertex AI:   ${sky("https://cloud.google.com/vertex-ai")}`));
-    console.log(dim(`  • Telegram:    ${sky("https://t.me/BotFather")}`));
-    console.log(dim(`  • Qwen3-TTS:   ${sky("https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")}`));
+    console.log(dim("  Try saying: \"Build me a todo app\" or \"Research AI trends in 2026\""));
+    console.log("");
+    console.log(dim("  Docs:     https://docs.wispy.cc"));
+    console.log(dim("  Help:     https://github.com/hausorlabs/wispy/issues"));
     console.log("");
   } catch (err: any) {
     rl.close();

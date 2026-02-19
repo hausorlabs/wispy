@@ -54,10 +54,10 @@ const READ_ONLY_TOOLS = new Set([
   "web_fetch", "web_search",
 ]);
 
-// Max context tokens to use (leave room for output)
-const MAX_CONTEXT_TOKENS = 100_000;
-// Auto-compact when context exceeds this percentage
+// Auto-compact when context exceeds this percentage of the model's window
 const AUTO_COMPACT_THRESHOLD = 0.75;
+// Reserve tokens for output generation
+const OUTPUT_RESERVE = 8_000;
 
 export type ContextEventCallback = (event: "compacting" | "compacted", info?: string) => void;
 
@@ -195,7 +195,8 @@ export class Agent {
       messageTokens += this.tokenManager.estimateTokens(m.content) + 4;
     }
     const totalTokens = systemTokens + messageTokens;
-    const usageRatio = totalTokens / MAX_CONTEXT_TOKENS;
+    const contextWindow = this.tokenManager.getContextWindow(this.ctx.config.gemini.models.pro);
+    const usageRatio = totalTokens / contextWindow;
 
     // If under threshold, no action needed
     if (usageRatio < AUTO_COMPACT_THRESHOLD || messages.length < 10) {
@@ -450,17 +451,20 @@ export class Agent {
 
     // Apply context windowing to prevent overflow
     const systemTokens = this.tokenManager.estimateTokens(systemPrompt);
+    const chatContextWindow = this.tokenManager.getContextWindow(this.ctx.config.gemini.models.pro);
     const messages = this.tokenManager.windowMessages(
       compactResult.compacted ? compactResult.messages : rawMessages,
-      MAX_CONTEXT_TOKENS,
+      chatContextWindow - OUTPUT_RESERVE,
       systemTokens
     ) as Array<{ role: "user" | "model"; content: string }>;
 
     log.info(
-      "Chat [%s] model=%s thinking=%s",
+      "Chat [%s] model=%s thinking=%s context=%d/%d",
       session.sessionKey.slice(0, 30),
       route.model,
-      thinkingLevel
+      thinkingLevel,
+      systemTokens + messages.reduce((s, m) => s + this.tokenManager.estimateTokens(m.content), 0),
+      chatContextWindow
     );
 
     // Agentic loop — generate, execute tools, feed results back, repeat
@@ -559,7 +563,7 @@ export class Agent {
     channel: string,
     sessionType: SessionType = "main",
     options?: { images?: Array<{ mimeType: string; data: string }> }
-  ): AsyncGenerator<{ type: string; content: string }> {
+  ): AsyncGenerator<{ type: string; content: string; success?: boolean }> {
     const { config, runtimeDir, soulDir } = this.ctx;
     const agentId = config.agent.id;
 
@@ -592,9 +596,10 @@ export class Agent {
 
     // Apply context windowing
     const systemTokens = this.tokenManager.estimateTokens(systemPrompt);
+    const streamContextWindow = this.tokenManager.getContextWindow(this.ctx.config.gemini.models.pro);
     const messages = this.tokenManager.windowMessages(
       compactResult.compacted ? compactResult.messages : rawMessages,
-      MAX_CONTEXT_TOKENS,
+      streamContextWindow - OUTPUT_RESERVE,
       systemTokens
     ) as Array<{ role: "user" | "model"; content: string }>;
 
@@ -621,6 +626,10 @@ export class Agent {
         yield { type: "thinking", content: result.thinking };
       }
 
+      if (result.thoughtSignature) {
+        yield { type: "thought_signature", content: result.thoughtSignature };
+      }
+
       // If tool calls, execute them and loop
       if (result.toolCalls && result.toolCalls.length > 0) {
         const toolResults: string[] = [];
@@ -631,7 +640,7 @@ export class Agent {
 
           const toolResult = await this.toolExecutor.execute(call);
           const resultText = toolResult.success ? toolResult.output : "ERROR: " + toolResult.error;
-          yield { type: "tool_result", content: resultText };
+          yield { type: "tool_result", content: resultText, success: toolResult.success };
 
           toolResults.push(`Tool: ${call.name}\nResult: ${resultText}`);
         }
@@ -658,6 +667,17 @@ export class Agent {
         for (let i = 0; i < words.length; i++) {
           yield { type: "text", content: (i > 0 ? " " : "") + words[i] };
         }
+      }
+
+      // Yield real token usage from Gemini API
+      if (result.usage) {
+        yield {
+          type: "usage",
+          content: JSON.stringify({
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+          }),
+        };
       }
       break;
     }

@@ -25,6 +25,8 @@ export class VectorStore {
     this.dbPath = resolve(runtimeDir, "memory", "embeddings.db");
     ensureDir(resolve(runtimeDir, "memory"));
     this.db = new Database(this.dbPath);
+    // WAL mode allows concurrent reads from multiple processes
+    this.db.pragma("journal_mode = WAL");
     this.init();
   }
 

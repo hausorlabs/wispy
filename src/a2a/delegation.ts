@@ -119,7 +119,7 @@ export class A2AServer {
       name: this.agentName,
       skills: skills.map((s) => s.name),
       channels: channels.map((c) => c.name),
-      models: ["gemini-3-pro", "gemini-3-flash", "gemini-3-image"],
+      models: ["gemini-3-pro-preview", "gemini-3-flash-preview", "imagen-3.0-generate-002"],
     };
   }
 
@@ -134,8 +134,15 @@ export class A2AServer {
   }
 
   start(port: number) {
-    this.app.listen(port, () => {
+    const server = this.app.listen(port, () => {
       log.info("A2A server listening on port %d", port);
+    });
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        log.warn("A2A port %d in use, running without A2A server", port);
+      } else {
+        log.error("A2A server error: %s", err.message);
+      }
     });
   }
 

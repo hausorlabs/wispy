@@ -10,17 +10,57 @@
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { startAllServices, stopAllServices } from "../x402/seller.js";
+import { DEMO_PORTS } from "../config.js";
 
-/** Start all demo services with a fresh or provided seller key */
+/** Dedup: track whether services are already running */
+let _running = false;
+let _sellerAddress = "";
+let _sellerKey = "";
+
+/** Wait for a service health endpoint to respond */
+async function waitForHealth(port: number, maxWaitMs = 5000): Promise<boolean> {
+  const url = `http://127.0.0.1:${port}/health`;
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(1000) });
+      if (res.ok) return true;
+    } catch {
+      // Not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
+
+/** Start all demo services with a fresh or provided seller key.
+ *  Idempotent: if already running, returns the existing seller info. */
 export async function startDemoServices(
   sellerPrivateKey?: string,
 ): Promise<{ sellerAddress: string; sellerKey: string }> {
+  // Dedup: return cached result if already started
+  if (_running && _sellerAddress) {
+    return { sellerAddress: _sellerAddress, sellerKey: _sellerKey };
+  }
+
   const key = sellerPrivateKey ?? generatePrivateKey();
   const account = privateKeyToAccount(key as `0x${string}`);
   const sellerAddress = account.address;
 
   await startAllServices(sellerAddress);
 
+  // Wait for all services to be healthy before returning
+  const ports = [DEMO_PORTS.weather, DEMO_PORTS.sentiment, DEMO_PORTS.report];
+  for (const port of ports) {
+    const healthy = await waitForHealth(port);
+    if (!healthy) {
+      console.warn(`[demo] Service on port ${port} did not become healthy in time`);
+    }
+  }
+
+  _running = true;
+  _sellerAddress = sellerAddress;
+  _sellerKey = key;
   return { sellerAddress, sellerKey: key };
 }
 
