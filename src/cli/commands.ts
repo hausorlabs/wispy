@@ -362,7 +362,7 @@ const commands: SlashCommand[] = [
   },
   {
     name: "wallet",
-    description: "Wallet management [export|import|recovery|recover|commerce|fund]",
+    description: "Wallet management [balance|details|export|import|recovery|recover|commerce|fund]",
     handler: async (args, ctx) => {
       const chalk = (await import("chalk")).default;
       const { getWalletAddress, getBalance, exportWalletPrivateKey, importWalletFromKey, exportWalletMnemonic, recoverWalletFromMnemonic } = await import("../wallet/x402.js");
@@ -531,6 +531,103 @@ const commands: SlashCommand[] = [
         return;
       }
 
+      // /wallet balance — detailed per-chain balances
+      if (subcommand === "balance") {
+        const addr = getWalletAddress(ctx.runtimeDir);
+        if (!addr) { console.log(t.dim("\nWallet not initialized.\n")); return; }
+
+        console.log(chalk.bold("\n  Wallet Balances\n"));
+        console.log(`  ${chalk.cyan("Base Mainnet")}`);
+        console.log(`  Address: ${addr}`);
+        try {
+          const bal = await getBalance(ctx.runtimeDir);
+          console.log(`  USDC:    ${bal}`);
+        } catch {
+          console.log(`  USDC:    ${t.dim("unavailable")}`);
+        }
+
+        // SKALE balance
+        const skaleKey = process.env.AGENT_PRIVATE_KEY;
+        if (skaleKey) {
+          console.log(`\n  ${chalk.cyan("SKALE")} ${chalk.dim("(gasless)")}`);
+          console.log(`  Key:     ${chalk.green("Set")}`);
+        }
+
+        // Solana balance
+        try {
+          const { getSolanaWalletAddress, getSolanaBalance: getSolBal } = await import("../wallet/solana.js");
+          const solAddr = getSolanaWalletAddress(ctx.runtimeDir);
+          if (solAddr) {
+            console.log(`\n  ${chalk.cyan("Solana")}`);
+            console.log(`  Address: ${solAddr}`);
+            try {
+              const solBal = await getSolBal(ctx.runtimeDir);
+              console.log(`  SOL:     ${solBal}`);
+            } catch {
+              console.log(`  SOL:     ${t.dim("unavailable")}`);
+            }
+          }
+        } catch {
+          // Solana module not available
+        }
+
+        // Commerce spending summary
+        const commerce = getCommerceEngine();
+        if (commerce) {
+          const spending = commerce.getDailySpending();
+          console.log(`\n  ${chalk.cyan("Today's Spending")}`);
+          console.log(`  Total:     $${spending.total.toFixed(2)}`);
+          console.log(`  Remaining: ${chalk.green("$" + spending.remaining.toFixed(2))}`);
+        }
+
+        console.log();
+        return;
+      }
+
+      // /wallet details — full wallet info dump
+      if (subcommand === "details") {
+        const addr = getWalletAddress(ctx.runtimeDir);
+        if (!addr) { console.log(t.dim("\nWallet not initialized.\n")); return; }
+
+        console.log(chalk.bold("\n  Wallet Details\n"));
+        console.log(`  Address:       ${addr}`);
+        console.log(`  Network:       Base (Chain ID 8453)`);
+        console.log(`  Wallet File:   ${t.dim(ctx.runtimeDir + "/wallet/wallet.json")}`);
+        console.log(`  SKALE Key:     ${process.env.AGENT_PRIVATE_KEY ? chalk.green("Set") : t.dim("Not set")}`);
+        console.log(`  CDP Wallet:    ${process.env.CDP_API_KEY_NAME ? chalk.green("Configured") : t.dim("Not configured")}`);
+
+        // Solana wallet
+        try {
+          const { getSolanaWalletAddress } = await import("../wallet/solana.js");
+          const solAddr = getSolanaWalletAddress(ctx.runtimeDir);
+          console.log(`  Solana:        ${solAddr ? solAddr : t.dim("Not initialized")}`);
+        } catch {
+          console.log(`  Solana:        ${t.dim("Module unavailable")}`);
+        }
+
+        // Commerce policy
+        const commerce = getCommerceEngine();
+        if (commerce) {
+          const policy = commerce.getPolicy();
+          console.log(`\n  ${chalk.cyan("Commerce Policy")}`);
+          console.log(`  Max/tx:          $${policy.maxPerTransaction}`);
+          console.log(`  Daily limit:     $${policy.dailyLimit}`);
+          console.log(`  Auto-approve:    $${policy.autoApproveBelow}`);
+          console.log(`  Require approval: $${policy.requireApprovalAbove}`);
+          if (policy.whitelistedRecipients.length > 0) {
+            console.log(`  Whitelisted:     ${policy.whitelistedRecipients.length} addresses`);
+          }
+          if (policy.blacklistedRecipients.length > 0) {
+            console.log(`  Blacklisted:     ${policy.blacklistedRecipients.length} addresses`);
+          }
+        } else {
+          console.log(`\n  ${t.dim("Commerce: Not enabled")}`);
+        }
+
+        console.log();
+        return;
+      }
+
       // /wallet fund — show address for funding
       if (subcommand === "fund") {
         const addr = getWalletAddress(ctx.runtimeDir);
@@ -567,7 +664,7 @@ const commands: SlashCommand[] = [
       }
 
       console.log();
-      console.log(t.dim("  Subcommands: /wallet export | import | recovery | recover | commerce | fund\n"));
+      console.log(t.dim("  Subcommands: /wallet balance | details | export | import | recovery | recover | commerce | fund\n"));
     },
   },
   {
@@ -1418,7 +1515,7 @@ const commands: SlashCommand[] = [
   },
   {
     name: "provider",
-    description: "Switch AI provider [gemini|openai|anthropic|ollama]",
+    description: "Switch AI provider [gemini|openai|anthropic|ollama|groq|openrouter|kimi]",
     handler: async (args, ctx) => {
       const chalk = (await import("chalk")).default;
       const { loadConfig, saveConfig } = await import("../config/config.js");
@@ -1428,10 +1525,11 @@ const commands: SlashCommand[] = [
       const PROVIDERS = {
         gemini: { name: "Google Gemini", color: chalk.blue, models: "gemini-3-pro, gemini-2.5-flash, etc." },
         openai: { name: "OpenAI", color: chalk.green, models: "gpt-4o, gpt-4-turbo, o1, etc." },
-        anthropic: { name: "Anthropic", color: chalk.magenta, models: "Various models" },
+        anthropic: { name: "Anthropic", color: chalk.magenta, models: "claude-opus-4, claude-sonnet-4, claude-haiku-4.5" },
         ollama: { name: "Ollama (Local)", color: chalk.yellow, models: "llama3, mistral, codellama, etc." },
         openrouter: { name: "OpenRouter", color: chalk.cyan, models: "Any model via OpenRouter" },
         groq: { name: "Groq", color: chalk.red, models: "llama-3.3-70b, mixtral-8x7b, etc." },
+        kimi: { name: "Kimi (Moonshot)", color: chalk.rgb(97, 175, 239), models: "moonshot-v1-8k, v1-32k, v1-128k" },
       };
 
       if (!input) {
@@ -2647,6 +2745,165 @@ const commands: SlashCommand[] = [
           console.log(chalk.red(`  Unknown subcommand: ${subCmd}`));
           console.log(chalk.dim("  Use /marathon for help."));
       }
+    },
+  },
+  {
+    name: "skills",
+    description: "Browser skill management [custom|create|delete|inspect|export|import]",
+    handler: async (args, ctx) => {
+      const chalk = (await import("chalk")).default;
+      const parts = args.trim().split(/\s+/);
+      const subcommand = parts[0]?.toLowerCase();
+
+      // Get the integration registry to access browser-engine
+      const agent = ctx.agent as any;
+      const registry = agent.integrationRegistry;
+      if (!registry) {
+        console.log(t.dim("\n  Integration registry not available.\n"));
+        return;
+      }
+
+      const browserEngine = registry.get("browser-engine");
+      if (!browserEngine) {
+        console.log(t.dim("\n  Browser Engine integration not enabled.\n"));
+        return;
+      }
+
+      const skillRegistry = (browserEngine as any).skillRegistry;
+      const skillStore = (browserEngine as any).skillStore;
+      if (!skillRegistry) {
+        console.log(t.dim("\n  Skill registry not initialized.\n"));
+        return;
+      }
+
+      if (subcommand === "custom") {
+        // List only custom skills
+        const customIds = skillStore?.listIds() || [];
+        if (customIds.length === 0) {
+          console.log(t.dim("\n  No custom skills found. Create one with: /skills create <name>\n"));
+          return;
+        }
+        console.log(chalk.bold(`\n  Custom Skills (${customIds.length})\n`));
+        for (const id of customIds) {
+          const skill = skillRegistry.get(id);
+          if (skill) {
+            console.log(`  ${chalk.cyan(id)} -- ${skill.name} (${skill.steps.length} steps)`);
+          }
+        }
+        console.log();
+        return;
+      }
+
+      if (subcommand === "inspect") {
+        const skillId = parts[1];
+        if (!skillId) {
+          console.log(chalk.red("\n  Usage: /skills inspect <skill-id>\n"));
+          return;
+        }
+        const skill = skillRegistry.get(skillId);
+        if (!skill) {
+          console.log(chalk.red(`\n  Skill "${skillId}" not found.\n`));
+          return;
+        }
+        console.log(chalk.bold(`\n  ${skill.name}`));
+        console.log(`  ID:       ${skill.id}`);
+        console.log(`  Category: ${skill.category}`);
+        console.log(`  Tags:     ${skill.tags.join(", ")}`);
+        console.log(`  Custom:   ${skillStore?.exists(skillId) ? chalk.yellow("Yes") : "No"}`);
+        console.log(`\n  ${t.dim("Parameters:")}`);
+        for (const p of skill.parameters) {
+          console.log(`    ${p.name}${p.required ? chalk.red("*") : ""}: ${p.description}`);
+        }
+        console.log(`\n  ${t.dim(`Steps (${skill.steps.length}):`)} `);
+        for (let i = 0; i < skill.steps.length; i++) {
+          const s = skill.steps[i];
+          console.log(`    ${i + 1}. ${s.action}${s.target ? ` -> ${s.target}` : ""}${s.description ? ` (${s.description})` : ""}`);
+        }
+        console.log();
+        return;
+      }
+
+      if (subcommand === "delete") {
+        const skillId = parts[1];
+        if (!skillId) {
+          console.log(chalk.red("\n  Usage: /skills delete <skill-id>\n"));
+          return;
+        }
+        if (!skillStore?.exists(skillId)) {
+          console.log(chalk.red(`\n  "${skillId}" is not a custom skill or doesn't exist.\n`));
+          return;
+        }
+        skillStore.delete(skillId);
+        console.log(chalk.green(`\n  Deleted custom skill: ${skillId}\n`));
+        return;
+      }
+
+      if (subcommand === "export") {
+        const skillId = parts[1];
+        if (!skillId) {
+          console.log(chalk.red("\n  Usage: /skills export <skill-id>\n"));
+          return;
+        }
+        const skill = skillRegistry.get(skillId);
+        if (!skill) {
+          console.log(chalk.red(`\n  Skill "${skillId}" not found.\n`));
+          return;
+        }
+        console.log(JSON.stringify(skill, null, 2));
+        return;
+      }
+
+      if (subcommand === "import") {
+        const filePath = parts[1];
+        if (!filePath) {
+          console.log(chalk.red("\n  Usage: /skills import <json-file-path>\n"));
+          return;
+        }
+        try {
+          const { readFileSync } = await import("fs");
+          const content = readFileSync(filePath, "utf-8");
+          const skill = JSON.parse(content);
+          if (!skill.id || !skill.name || !skill.steps) {
+            console.log(chalk.red("\n  Invalid skill file: must have id, name, and steps.\n"));
+            return;
+          }
+          skillRegistry.register(skill);
+          skillStore?.save(skill);
+          console.log(chalk.green(`\n  Imported skill: ${skill.name} (${skill.id})\n`));
+        } catch (err: any) {
+          console.log(chalk.red(`\n  Import failed: ${err.message}\n`));
+        }
+        return;
+      }
+
+      if (subcommand === "create") {
+        const name = parts.slice(1).join(" ");
+        if (!name) {
+          console.log(chalk.red("\n  Usage: /skills create <skill-name>\n"));
+          console.log(t.dim("  Example: /skills create LinkedIn Job Search\n"));
+          return;
+        }
+        console.log(t.dim(`\n  To create "${name}", describe the goal to your agent in natural language.`));
+        console.log(t.dim("  The agent will use web_skill_create to generate it.\n"));
+        console.log(`  ${chalk.cyan("Try:")} "Create a browser skill called '${name}' that ..."\n`);
+        return;
+      }
+
+      // Default: list all skills
+      const allSkills = skillRegistry.listAll();
+      const customIds = new Set(skillStore?.listIds() || []);
+      let total = 0;
+      console.log(chalk.bold("\n  Browser Skills\n"));
+      for (const [category, skills] of Object.entries(allSkills)) {
+        console.log(`  ${chalk.cyan(category.toUpperCase())} (${(skills as any[]).length})`);
+        for (const s of skills as any[]) {
+          const custom = customIds.has(s.id) ? chalk.yellow(" [custom]") : "";
+          console.log(`    ${s.id} -- ${s.name}${custom}`);
+          total++;
+        }
+      }
+      console.log(`\n  ${total} skills total (${customIds.size} custom)\n`);
+      console.log(t.dim("  Subcommands: /skills custom | create | delete | inspect | export | import\n"));
     },
   },
 ];

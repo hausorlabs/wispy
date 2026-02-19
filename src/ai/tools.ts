@@ -19,6 +19,7 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
       type: "object",
       properties: {
         command: { type: "string", description: "The shell command to execute" },
+        cwd: { type: "string", description: "Working directory to run the command in (absolute path). Defaults to workspace if not provided." },
       },
       required: ["command"],
     },
@@ -36,11 +37,11 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
   },
   {
     name: "file_write",
-    description: "Write content to a file. Creates parent directories. Use for: creating files, writing code, saving data.",
+    description: "Write content to a file anywhere on the filesystem. Creates parent directories automatically. Use for: creating files, writing code, saving data. Supports absolute paths (C:/Users/...) for local projects or relative paths for workspace.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Absolute file path" },
+        path: { type: "string", description: "File path (absolute recommended, e.g. 'C:/Users/me/Projects/app/index.html'). Relative paths resolve to workspace." },
         content: { type: "string", description: "Content to write" },
       },
       required: ["path", "content"],
@@ -60,22 +61,22 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
   },
   {
     name: "list_directory",
-    description: "List files and folders in a directory. Use for: exploring file structure.",
+    description: "List files and folders in any directory on the filesystem. Use for: exploring file structure, browsing local projects.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Directory path to list" },
+        path: { type: "string", description: "Absolute directory path (e.g. 'C:/Users/me/Projects')" },
       },
       required: ["path"],
     },
   },
   {
     name: "create_folder",
-    description: "Create a new folder/directory. Creates parent directories if needed. Use for: organizing files, setting up project structure.",
+    description: "Create a new folder/directory anywhere on the filesystem. Creates parent directories if needed. Use for: organizing files, setting up project structure.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Absolute path of the folder to create" },
+        path: { type: "string", description: "Folder path (absolute recommended, e.g. 'C:/Users/me/Projects/my-app'). Relative paths resolve to workspace." },
       },
       required: ["path"],
     },
@@ -812,6 +813,17 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
     },
   },
   {
+    name: "telegram_list_files",
+    description: "List files in a directory and send the listing to the user via Telegram. Defaults to ~/Downloads if no directory specified.",
+    parameters: {
+      type: "object",
+      properties: {
+        directory: { type: "string", description: "Directory path to list (default: ~/Downloads)" },
+        sendFile: { type: "string", description: "If specified, also send this file path as a document attachment" },
+      },
+    },
+  },
+  {
     name: "send_progress_update",
     description: "Send a progress update to the user via Telegram. Use during long-running tasks to keep user informed.",
     parameters: {
@@ -1006,6 +1018,67 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
         fps: { type: "number", description: "Frames per second. Default: 15" },
         region: { type: "string", description: "Region: 'full' or 'active'. Default: full" },
       },
+      required: [],
+    },
+  },
+  // === Webcam & Live Vision ===
+  {
+    name: "webcam_capture",
+    description: "Capture a single frame from the webcam camera. Returns the image file path.",
+    parameters: {
+      type: "object",
+      properties: {
+        device: { type: "string", description: "Camera device name or ID (platform-specific). Uses default camera if not specified." },
+        width: { type: "number", description: "Capture width in pixels. Default: 1280" },
+        height: { type: "number", description: "Capture height in pixels. Default: 720" },
+        sendToChat: { type: "boolean", description: "Send the captured image to the current Telegram chat" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "webcam_record",
+    description: "Record a short video clip from the webcam. Max 30 seconds. Returns the video file path.",
+    parameters: {
+      type: "object",
+      properties: {
+        duration: { type: "number", description: "Recording duration in seconds. Default: 10, max: 30" },
+        fps: { type: "number", description: "Frames per second. Default: 15" },
+        device: { type: "string", description: "Camera device name or ID. Uses default camera if not specified." },
+        sendToChat: { type: "boolean", description: "Send the recorded video to the current Telegram chat" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "webcam_list_devices",
+    description: "List available webcam/video capture devices on this system.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "webcam_live_start",
+    description: "Start a live vision stream: captures webcam frames at intervals and analyzes each with Gemini vision. Streams real-time analysis back to the user.",
+    parameters: {
+      type: "object",
+      properties: {
+        intervalMs: { type: "number", description: "Time between frame captures in ms. Default: 2000 (2 seconds)" },
+        maxFrames: { type: "number", description: "Max frames to analyze before auto-stopping. Default: 30" },
+        prompt: { type: "string", description: "Custom analysis prompt for Gemini vision. Default: 'Describe what you see'" },
+        device: { type: "string", description: "Camera device name or ID. Uses default if not specified." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "webcam_live_stop",
+    description: "Stop the active live vision stream and return a summary of frames analyzed.",
+    parameters: {
+      type: "object",
+      properties: {},
       required: [],
     },
   },

@@ -77,6 +77,11 @@ const INTEGRATIONS = [
   { id: "notion", label: "Notion" },
   { id: "slack", label: "Slack" },
   { id: "spotify", label: "Spotify" },
+  { id: "zoho-email", label: "Zoho Mail" },
+  { id: "anthropic", label: "Anthropic (Claude)" },
+  { id: "groq", label: "Groq" },
+  { id: "openrouter", label: "OpenRouter" },
+  { id: "kimi", label: "Kimi (Moonshot)" },
 ];
 
 // ── Helpers ──────────────────────────────────────────────
@@ -266,6 +271,23 @@ export async function runSetupWizard(opts: {
 
     const modeChoice = await ask(rl, sky("  Select [1/2] (default: 2 for Autonomous): "));
     const autonomousMode = modeChoice.trim() !== "1";
+
+    // ── Step 2d: File System Access ──────────────────────
+    let fullFilesystemAccess = false;
+    if (autonomousMode) {
+      console.clear();
+      console.log(WISPY_ASCII);
+      console.log(skyBold(`  ${chalk.yellow("▸")} File System Access\n`));
+      console.log(dim("  Autonomous mode is enabled. Wispy can already write files in its workspace."));
+      console.log(dim("  Enable full filesystem access to let Wispy work on projects anywhere.\n"));
+      console.log(`  ${sky("Examples:")}`);
+      console.log(dim("  - Edit files across your projects directories"));
+      console.log(dim("  - Read/write anywhere on your drive"));
+      console.log(dim("  - Manage files in your Downloads folder\n"));
+
+      const fsChoice = await ask(rl, sky("  Enable full filesystem access? [Y/n]: "));
+      fullFilesystemAccess = !fsChoice.trim().toLowerCase().startsWith("n");
+    }
 
     // ── Step 3: Theme ────────────────────────────────────
     console.clear();
@@ -655,7 +677,7 @@ export async function runSetupWizard(opts: {
       browser: { enabled: true },
       wallet: { enabled: commerceEnabled, chain: "skale-bite-sandbox" },
       memory: { embeddingDimensions: 768, heartbeatIntervalMinutes: 30, hybridSearch: true },
-      security: { requireApprovalForExternal: !autonomousMode, allowedGroups: [] as string[], autonomousMode },
+      security: { requireApprovalForExternal: !autonomousMode, allowedGroups: [] as string[], autonomousMode, fullFilesystemAccess },
       thinking: { defaultLevel: "medium", costAware: true },
       theme: selectedTheme,
       agents: selectedAgents,
@@ -752,8 +774,13 @@ export async function runSetupWizard(opts: {
       ? green("✓ Enabled") + dim(` (${cdpKeyName ? "CDP wallet" : "raw key"})`)
       : dim("Not configured");
 
+    const fsDisplay = fullFilesystemAccess
+      ? chalk.yellow("⚡ Full Access") + dim(" (entire drive)")
+      : dim("Workspace only");
+
     console.log(`  ${dim("AI Provider:")}  ${aiDisplay}`);
     console.log(`  ${dim("Mode:")}         ${modeDisplay}`);
+    console.log(`  ${dim("File System:")}  ${fsDisplay}`);
     console.log(`  ${dim("Theme:")}        ${themeDisplay}`);
     console.log(`  ${dim("Agents:")}       ${agentsDisplay}`);
     console.log(`  ${dim("Telegram:")}     ${telegramDisplay}`);

@@ -10,7 +10,13 @@ const EXPLORERS: Record<string, string> = {
     "https://base-sepolia-testnet-explorer.skalenodes.com:10032",
   "base-sepolia": "https://sepolia.basescan.org",
   base: "https://basescan.org",
+  skale: "https://elated-tan-skat.explorer.mainnet.skalenodes.com",
+  solana: "https://solscan.io",
+  tempo: process.env.TEMPO_EXPLORER_URL || "",
 };
+
+// Chains where the address path is /account/ instead of /address/
+const ACCOUNT_PATH_CHAINS = new Set(["solana"]);
 
 const DEFAULT_NETWORK = "skale-bite";
 
@@ -26,7 +32,9 @@ export function addressLink(
   network = DEFAULT_NETWORK,
 ): string {
   const base = EXPLORERS[network] || EXPLORERS[DEFAULT_NETWORK];
-  return `${base}/address/${addr}`;
+  if (!base) return "#";
+  const path = ACCOUNT_PATH_CHAINS.has(network) ? "/account/" : "/address/";
+  return `${base}${path}${addr}`;
 }
 
 /** CLI-formatted markdown proof link for a transaction. */

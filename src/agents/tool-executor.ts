@@ -88,6 +88,7 @@ export class ToolExecutor {
   private cronService?: CronService;
   private reminderService?: ReminderService;
   private progressCallback?: ProgressCallback;
+  private liveStream?: import("../vision/live-stream.js").LiveVisionStream;
 
   constructor(
     config: WispyConfig,
@@ -103,6 +104,23 @@ export class ToolExecutor {
     this.memoryManager = memoryManager;
     this.integrationRegistry = integrationRegistry;
     this.mcpRegistry = mcpRegistry;
+  }
+
+  /**
+   * Check if a file path is allowed based on filesystem access settings.
+   */
+  private isPathAllowed(filePath: string): boolean {
+    // Always allow runtime and soul directories
+    if (filePath.startsWith(this.runtimeDir) || filePath.startsWith(this.soulDir)) return true;
+
+    // Autonomous mode or full filesystem access: allow all
+    if (this.config.security.autonomousMode || this.config.security.fullFilesystemAccess) return true;
+
+    // Standard mode: restrict to workspace
+    const workspaceDir = resolve(this.runtimeDir, "workspace");
+    if (filePath.startsWith(workspaceDir)) return true;
+
+    return false;
   }
 
   /**
@@ -286,6 +304,8 @@ export class ToolExecutor {
         // === Telegram Document Delivery ===
         case "send_document_to_telegram":
           return this.executeSendDocumentToTelegram(tool.args);
+        case "telegram_list_files":
+          return this.executeTelegramListFiles(tool.args);
         case "send_progress_update":
           return this.executeSendProgressUpdate(tool.args);
         case "ask_user_confirmation":
@@ -320,6 +340,17 @@ export class ToolExecutor {
           return this.executeDesktopScreenshot(tool.args);
         case "screen_record":
           return this.executeScreenRecord(tool.args);
+        // === Webcam & Live Vision ===
+        case "webcam_capture":
+          return this.executeWebcamCapture(tool.args);
+        case "webcam_record":
+          return this.executeWebcamRecord(tool.args);
+        case "webcam_list_devices":
+          return this.executeWebcamListDevices();
+        case "webcam_live_start":
+          return this.executeWebcamLiveStart(tool.args);
+        case "webcam_live_stop":
+          return this.executeWebcamLiveStop();
         // === Git & GitHub ===
         case "git_init":
           return this.executeGitInit(tool.args);
@@ -412,15 +443,23 @@ export class ToolExecutor {
     }
 
     try {
-      // Use workspace directory as cwd for relative commands
-      const { join } = await import("path");
-      const workspaceDir = join(this.runtimeDir, "workspace");
-      ensureDir(workspaceDir);
+      // Determine working directory: explicit cwd arg, or fallback to workspace
+      const { join, isAbsolute } = await import("path");
+      const customCwd = args.cwd ? String(args.cwd) : "";
+      let effectiveCwd: string;
+
+      if (customCwd && isAbsolute(customCwd) && existsSync(customCwd)) {
+        effectiveCwd = customCwd;
+      } else {
+        const workspaceDir = join(this.runtimeDir, "workspace");
+        ensureDir(workspaceDir);
+        effectiveCwd = workspaceDir;
+      }
 
       const { stdout, stderr } = await execAsync(command, {
         timeout: 180000, // 3 minutes for npm operations
         maxBuffer: 10 * 1024 * 1024, // 10MB for large outputs
-        cwd: workspaceDir, // Run commands in workspace
+        cwd: effectiveCwd,
         env: { ...process.env },
       });
 
@@ -512,6 +551,9 @@ export class ToolExecutor {
   private executeFileRead(args: Record<string, unknown>): ToolResult {
     const path = String(args.path || "");
     if (!path) return { success: false, output: "", error: "No path provided" };
+    if (!this.isPathAllowed(resolve(path))) {
+      return { success: false, output: "", error: `Access denied: ${path}\nEnable full filesystem access with: /setup or set security.fullFilesystemAccess in config.` };
+    }
     if (!existsSync(path)) return { success: false, output: "", error: `File not found: ${path}` };
 
     try {
@@ -540,6 +582,10 @@ export class ToolExecutor {
       path = resolvePath(workspaceDir, path);
     }
 
+    if (!this.isPathAllowed(path)) {
+      return { success: false, output: "", error: `Access denied: ${path}\nEnable full filesystem access with: /setup or set security.fullFilesystemAccess in config.` };
+    }
+
     // Create checkpoint before overwrite
     if (existsSync(path)) {
       try { createCheckpoint(this.runtimeDir, path); } catch { /* non-fatal */ }
@@ -559,11 +605,10 @@ export class ToolExecutor {
     } catch (err: any) {
       // Handle permission errors with helpful message
       if (err.code === "EPERM" || err.code === "EACCES") {
-        const workspaceDir = join(this.runtimeDir, "workspace");
         return {
           success: false,
           output: "",
-          error: `Permission denied: ${path}\n\nI don't have write access to this location. Try using a relative path (e.g., "calculator/index.html") and I'll create it in my workspace: ${workspaceDir}`,
+          error: `Permission denied: ${path}\n\nI don't have write access to this location. Try a different directory, or check folder permissions.`,
         };
       }
       return { success: false, output: "", error: err.message };
@@ -1565,11 +1610,10 @@ export class ToolExecutor {
     } catch (err: any) {
       // Handle permission errors with helpful message
       if (err.code === "EPERM" || err.code === "EACCES") {
-        const workspaceDir = join(this.runtimeDir, "workspace");
         return {
           success: false,
           output: "",
-          error: `Permission denied: ${path}\n\nTry using a relative path (e.g., "my-project") and I'll create it in my workspace: ${workspaceDir}`,
+          error: `Permission denied: ${path}\n\nI don't have access to this location. Try a different directory, or check folder permissions.`,
         };
       }
       return { success: false, output: "", error: err.message };
@@ -3605,6 +3649,45 @@ export default ${componentName};
     }
   }
 
+  private async executeTelegramListFiles(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      const { homedir } = await import("os");
+      const { join, basename } = await import("path");
+
+      const targetDir = String(args.directory || join(homedir(), "Downloads"));
+
+      if (!existsSync(targetDir)) {
+        return { success: false, output: "", error: `Directory not found: ${targetDir}` };
+      }
+
+      const entries = readdirSync(targetDir, { withFileTypes: true })
+        .slice(0, 50)
+        .map((e) => {
+          const icon = e.isDirectory() ? "[DIR]" : "[FILE]";
+          return `${icon} ${e.name}`;
+        });
+
+      const listing = `Directory: ${targetDir}\n\n${entries.join("\n") || "(empty)"}`;
+
+      // If sendFile is specified, also send that file as attachment
+      const sendFile = args.sendFile ? String(args.sendFile) : "";
+      if (sendFile && existsSync(sendFile)) {
+        const chatId = this.currentChatContext?.chatId
+          || process.env.TELEGRAM_CHAT_ID;
+        if (chatId) {
+          try {
+            const { sendTelegramDocument } = await import("../channels/telegram/adapter.js");
+            await sendTelegramDocument(chatId, sendFile, basename(sendFile));
+          } catch { /* non-fatal */ }
+        }
+      }
+
+      return { success: true, output: listing };
+    } catch (err: any) {
+      return { success: false, output: "", error: `List files error: ${err.message}` };
+    }
+  }
+
   private async executeSendProgressUpdate(args: Record<string, unknown>): Promise<ToolResult> {
     const type = String(args.type || "update") as any;
     const message = String(args.message || "");
@@ -3716,7 +3799,7 @@ export default ${componentName};
       // For grant actions, we just report what would happen (actual chmod is too dangerous)
       return {
         success: true,
-        output: `Permission action '${action}' noted. In sandboxed mode, use workspace directory for full access: ${resolve(this.runtimeDir, "workspace")}`,
+        output: `Permission action '${action}' noted. Use file_write with an absolute path to write files anywhere you have access.`,
       };
     } catch (err: any) {
       return { success: false, output: "", error: `Permission check error: ${err.message}` };
@@ -4450,6 +4533,189 @@ ${newTaskContext}
     } catch (err: any) {
       return { success: false, output: "", error: `Screen recording failed: ${err.message}` };
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // WEBCAM & LIVE VISION TOOLS
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  private async executeWebcamCapture(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      const { captureFrame } = await import("../vision/webcam.js");
+      const outputDir = resolve(this.runtimeDir, "captures");
+
+      const framePath = captureFrame({
+        device: args.device ? String(args.device) : undefined,
+        width: args.width ? Number(args.width) : undefined,
+        height: args.height ? Number(args.height) : undefined,
+        outputDir,
+      });
+
+      // Send to chat if requested
+      if (args.sendToChat && this.currentChatContext?.chatId) {
+        try {
+          const { sendDocument } = await import("../documents/telegram-delivery.js");
+          await sendDocument(this.currentChatContext.chatId, framePath, {
+            caption: "Webcam capture",
+          });
+        } catch (sendErr: any) {
+          log.warn("Failed to send webcam capture to chat: %s", sendErr.message);
+        }
+      }
+
+      return {
+        success: true,
+        output: `Webcam frame captured!\nPath: ${framePath}${args.sendToChat ? "\nSent to Telegram: Yes" : ""}`,
+      };
+    } catch (err: any) {
+      return { success: false, output: "", error: `Webcam capture failed: ${err.message}` };
+    }
+  }
+
+  private async executeWebcamRecord(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      const { recordVideo } = await import("../vision/webcam.js");
+      const outputDir = resolve(this.runtimeDir, "captures");
+
+      const videoPath = recordVideo({
+        device: args.device ? String(args.device) : undefined,
+        duration: args.duration ? Number(args.duration) : undefined,
+        fps: args.fps ? Number(args.fps) : undefined,
+        outputDir,
+      });
+
+      const { statSync } = await import("fs");
+      const stats = statSync(videoPath);
+      const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+
+      // Send to chat if requested
+      if (args.sendToChat && this.currentChatContext?.chatId) {
+        try {
+          const { sendDocument } = await import("../documents/telegram-delivery.js");
+          await sendDocument(this.currentChatContext.chatId, videoPath, {
+            caption: `Webcam recording (${args.duration || 10}s)`,
+          });
+        } catch (sendErr: any) {
+          log.warn("Failed to send webcam video to chat: %s", sendErr.message);
+        }
+      }
+
+      return {
+        success: true,
+        output: `Webcam video recorded!\nPath: ${videoPath}\nDuration: ${args.duration || 10}s\nSize: ${sizeMB} MB${args.sendToChat ? "\nSent to Telegram: Yes" : ""}`,
+      };
+    } catch (err: any) {
+      return { success: false, output: "", error: `Webcam recording failed: ${err.message}` };
+    }
+  }
+
+  private async executeWebcamListDevices(): Promise<ToolResult> {
+    try {
+      const { listDevices, isFfmpegAvailable } = await import("../vision/webcam.js");
+
+      if (!isFfmpegAvailable()) {
+        return {
+          success: false,
+          output: "",
+          error: "FFmpeg not found. Install FFmpeg to use webcam features: https://ffmpeg.org/download.html",
+        };
+      }
+
+      const devices = listDevices();
+
+      if (devices.length === 0) {
+        return {
+          success: true,
+          output: "No video capture devices found. Make sure a webcam is connected.",
+        };
+      }
+
+      const lines = devices.map((d, i) =>
+        `${i + 1}. ${d.name} (ID: ${d.id}, Type: ${d.type})`
+      );
+
+      return {
+        success: true,
+        output: `Found ${devices.length} video device(s):\n${lines.join("\n")}`,
+      };
+    } catch (err: any) {
+      return { success: false, output: "", error: `Device listing failed: ${err.message}` };
+    }
+  }
+
+  private async executeWebcamLiveStart(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      // Check if already running
+      if (this.liveStream?.getStatus().running) {
+        return {
+          success: false,
+          output: "",
+          error: "A live stream is already running. Call webcam_live_stop first.",
+        };
+      }
+
+      const { LiveVisionStream } = await import("../vision/live-stream.js");
+      this.liveStream = new LiveVisionStream();
+
+      const intervalMs = args.intervalMs ? Number(args.intervalMs) : 2000;
+      const maxFrames = args.maxFrames ? Number(args.maxFrames) : 30;
+      const prompt = args.prompt ? String(args.prompt) : undefined;
+      const device = args.device ? String(args.device) : undefined;
+      const outputDir = resolve(this.runtimeDir, "captures");
+
+      // Start the stream -- onFrame sends analysis to chat or logs it
+      const chatCtx = this.currentChatContext;
+      await this.liveStream.start({
+        device,
+        intervalMs,
+        maxFrames,
+        prompt,
+        outputDir,
+        onFrame: async (analysis: string, frameIndex: number) => {
+          const msg = `[Frame ${frameIndex}] ${analysis}`;
+          log.info(msg);
+
+          // Send to Telegram if available
+          if (chatCtx?.chatId) {
+            try {
+              const { sendDocument } = await import("../documents/telegram-delivery.js");
+              // Use Telegram bot API to send text message
+              const token = process.env.TELEGRAM_BOT_TOKEN;
+              if (token) {
+                await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ chat_id: chatCtx.chatId, text: msg }),
+                });
+              }
+            } catch { /* best-effort */ }
+          }
+        },
+      });
+
+      return {
+        success: true,
+        output: `Live vision stream started!\nInterval: ${intervalMs}ms\nMax frames: ${maxFrames}\nPrompt: ${prompt || "Describe what you see"}\nDevice: ${device || "default"}`,
+      };
+    } catch (err: any) {
+      return { success: false, output: "", error: `Live stream failed: ${err.message}` };
+    }
+  }
+
+  private async executeWebcamLiveStop(): Promise<ToolResult> {
+    if (!this.liveStream) {
+      return { success: false, output: "", error: "No live stream is running." };
+    }
+
+    const status = this.liveStream.getStatus();
+    this.liveStream.stop();
+
+    const elapsed = status.startedAt ? Math.round((Date.now() - status.startedAt) / 1000) : 0;
+
+    return {
+      success: true,
+      output: `Live stream stopped.\nFrames analyzed: ${status.framesAnalyzed}\nDuration: ${elapsed}s\nLast analysis: ${status.lastAnalysis || "N/A"}`,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════

@@ -1528,6 +1528,84 @@ I work autonomously and keep you updated! 🚀`;
   });
 
   // ==============================================
+  // FILE ACCESS COMMANDS
+  // ==============================================
+
+  // /files [path] - List files in a directory
+  bot.command("files", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    try {
+      const { homedir } = await import("os");
+      const { join, basename } = await import("path");
+      const { readdirSync, statSync } = await import("fs");
+
+      const args = (ctx as any).match?.trim() || "";
+      const targetDir = args || join(homedir(), "Downloads");
+
+      const entries = readdirSync(targetDir, { withFileTypes: true })
+        .slice(0, 30)
+        .map((e: any) => {
+          const icon = e.isDirectory() ? "\u{1F4C1}" : "\u{1F4C4}";
+          let size = "";
+          if (!e.isDirectory()) {
+            try {
+              const s = statSync(join(targetDir, e.name)).size;
+              size = s > 1048576
+                ? ` (${(s / 1048576).toFixed(1)}MB)`
+                : s > 1024
+                  ? ` (${(s / 1024).toFixed(0)}KB)`
+                  : ` (${s}B)`;
+            } catch { /* skip */ }
+          }
+          return `${icon} ${e.name}${size}`;
+        })
+        .join("\n");
+
+      const header = `\u{1F4C2} *${basename(targetDir)}*\n_(${targetDir})_\n`;
+      await ctx.reply(header + "\n" + (entries || "_Empty directory_"), { parse_mode: "Markdown" });
+    } catch (err: any) {
+      await ctx.reply("\u274C Could not list directory: " + err.message);
+    }
+  });
+
+  // /send <filepath> - Send a local file to this chat
+  bot.command("send", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const filePath = ((ctx as any).match || "").trim();
+    if (!filePath) {
+      await ctx.reply("Usage: /send <file_path>\nExample: /send C:/Users/You/Downloads/report.pdf");
+      return;
+    }
+
+    const fs = await import("fs");
+    if (!fs.existsSync(filePath)) {
+      await ctx.reply("\u274C File not found: " + filePath);
+      return;
+    }
+
+    try {
+      const chatId = String(ctx.chat?.id || "");
+      const { basename } = await import("path");
+      const sent = await sendTelegramDocument(chatId, filePath, basename(filePath));
+      if (!sent) {
+        await ctx.reply("\u274C Failed to send file. Check the file path and try again.");
+      }
+    } catch (err: any) {
+      await ctx.reply("\u274C Send failed: " + err.message);
+    }
+  });
+
+  // ==============================================
   // DEVELOPMENT WORKFLOW COMMANDS
   // ==============================================
 
@@ -2374,6 +2452,9 @@ I work autonomously and keep you updated! 🚀`;
       "/tokens \u2014 Token usage\n" +
       "/cost \u2014 Cost breakdown\n" +
       "/context \u2014 Context window\n\n" +
+      "*Files*\n" +
+      "/files \u2014 List files in directory\n" +
+      "/send \u2014 Send a local file\n\n" +
       "*Utilities*\n" +
       "/image \u2014 Generate image\n" +
       "/voice \u2014 Toggle voice replies\n" +
