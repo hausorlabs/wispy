@@ -226,6 +226,120 @@ export async function runSetupWizard(opts: {
       }
     }
 
+    // ── Step 2a+: Additional AI Providers (optional) ────
+    console.clear();
+    console.log(WISPY_ASCII);
+    console.log(skyBold(`  ${chalk.cyan("▸")} Additional AI Providers (Optional)\n`));
+    console.log(dim("  Wispy's core engine runs on Gemini. You can also configure"));
+    console.log(dim("  other providers as tools the agent can delegate tasks to.\n"));
+    console.log(`  ${sky("1)")} ${bold("Anthropic")} ${dim("(Claude Opus, Sonnet)")}`);
+    console.log(`  ${sky("2)")} ${bold("OpenAI")} ${dim("(GPT-4o, Codex, o3)")}`);
+    console.log(`  ${sky("3)")} ${bold("Groq")} ${dim("(Ultra-fast inference, free tier)")}`);
+    console.log(`  ${sky("4)")} ${bold("OpenRouter")} ${dim("(200+ models, unified API)")}`);
+    console.log(`  ${sky("5)")} ${bold("Kimi / Moonshot")} ${dim("(128K context, long docs)")}`);
+    console.log(`  ${sky("6)")} ${bold("Ollama")} ${dim("(Local, free, offline)")}`);
+    console.log("");
+
+    let anthropicKey = process.env.ANTHROPIC_API_KEY || "";
+    let openaiKey = process.env.OPENAI_API_KEY || "";
+    let groqKey = process.env.GROQ_API_KEY || "";
+    let openrouterKey = process.env.OPENROUTER_API_KEY || "";
+    let kimiKey = process.env.MOONSHOT_API_KEY || "";
+    let ollamaUrl = "";
+
+    const addProviders = await ask(rl, sky("  Add providers? Enter numbers (e.g. 1,3) or press Enter to skip: "));
+
+    if (addProviders.trim()) {
+      const picks = parseNumberList(addProviders, 6);
+      console.log("");
+
+      for (const idx of picks) {
+        switch (idx) {
+          case 0: { // Anthropic
+            if (anthropicKey) {
+              const masked = anthropicKey.slice(0, 10) + "..." + anthropicKey.slice(-4);
+              console.log(green(`  ✓ Anthropic key found: ${masked}`));
+            } else {
+              console.log(dim(`  Get your key at: ${sky("https://console.anthropic.com/keys")}`));
+              const key = await ask(rl, sky("  Anthropic API key (sk-ant-...): "));
+              anthropicKey = key.trim();
+              if (anthropicKey) console.log(green("  ✓ Anthropic configured"));
+              else console.log(dim("  Skipped."));
+            }
+            console.log("");
+            break;
+          }
+          case 1: { // OpenAI
+            if (openaiKey) {
+              const masked = openaiKey.slice(0, 8) + "..." + openaiKey.slice(-4);
+              console.log(green(`  ✓ OpenAI key found: ${masked}`));
+            } else {
+              console.log(dim(`  Get your key at: ${sky("https://platform.openai.com/api-keys")}`));
+              const key = await ask(rl, sky("  OpenAI API key (sk-...): "));
+              openaiKey = key.trim();
+              if (openaiKey) console.log(green("  ✓ OpenAI configured"));
+              else console.log(dim("  Skipped."));
+            }
+            console.log("");
+            break;
+          }
+          case 2: { // Groq
+            if (groqKey) {
+              const masked = groqKey.slice(0, 8) + "..." + groqKey.slice(-4);
+              console.log(green(`  ✓ Groq key found: ${masked}`));
+            } else {
+              console.log(dim(`  Get your key at: ${sky("https://console.groq.com/keys")}`));
+              const key = await ask(rl, sky("  Groq API key (gsk_...): "));
+              groqKey = key.trim();
+              if (groqKey) console.log(green("  ✓ Groq configured"));
+              else console.log(dim("  Skipped."));
+            }
+            console.log("");
+            break;
+          }
+          case 3: { // OpenRouter
+            if (openrouterKey) {
+              const masked = openrouterKey.slice(0, 10) + "..." + openrouterKey.slice(-4);
+              console.log(green(`  ✓ OpenRouter key found: ${masked}`));
+            } else {
+              console.log(dim(`  Get your key at: ${sky("https://openrouter.ai/keys")}`));
+              const key = await ask(rl, sky("  OpenRouter API key (sk-or-...): "));
+              openrouterKey = key.trim();
+              if (openrouterKey) console.log(green("  ✓ OpenRouter configured"));
+              else console.log(dim("  Skipped."));
+            }
+            console.log("");
+            break;
+          }
+          case 4: { // Kimi
+            if (kimiKey) {
+              const masked = kimiKey.slice(0, 8) + "..." + kimiKey.slice(-4);
+              console.log(green(`  ✓ Kimi key found: ${masked}`));
+            } else {
+              console.log(dim(`  Get your key at: ${sky("https://platform.moonshot.cn/console/api-keys")}`));
+              const key = await ask(rl, sky("  Moonshot API key: "));
+              kimiKey = key.trim();
+              if (kimiKey) console.log(green("  ✓ Kimi configured"));
+              else console.log(dim("  Skipped."));
+            }
+            console.log("");
+            break;
+          }
+          case 5: { // Ollama
+            console.log(dim("  Make sure Ollama is running locally."));
+            console.log(dim(`  Install: ${sky("https://ollama.com/download")}`));
+            const url = await ask(rl, sky("  Ollama URL (default: http://localhost:11434): "));
+            ollamaUrl = url.trim() || "http://localhost:11434";
+            console.log(green(`  ✓ Ollama: ${ollamaUrl}`));
+            console.log("");
+            break;
+          }
+        }
+      }
+    } else {
+      console.log(dim("  Skipped. You can add providers later in .env or config.yaml.\n"));
+    }
+
     // ── Step 2b: Telegram Bot Token (optional) ──────────
     console.clear();
     console.log(WISPY_ASCII);
@@ -674,6 +788,14 @@ export async function runSetupWizard(opts: {
         telegram: { enabled: !!telegramToken, token: telegramToken || undefined },
         whatsapp: { enabled: false },
       },
+      providers: {
+        ...(anthropicKey ? { anthropic: { apiKey: anthropicKey } } : {}),
+        ...(openaiKey ? { openai: { apiKey: openaiKey } } : {}),
+        ...(groqKey ? { groq: { apiKey: groqKey } } : {}),
+        ...(openrouterKey ? { openrouter: { apiKey: openrouterKey } } : {}),
+        ...(kimiKey ? { kimi: { apiKey: kimiKey } } : {}),
+        ...(ollamaUrl ? { ollama: { baseUrl: ollamaUrl } } : {}),
+      },
       browser: { enabled: true },
       wallet: { enabled: commerceEnabled, chain: "skale-bite-sandbox" },
       memory: { embeddingDimensions: 768, heartbeatIntervalMinutes: 30, hybridSearch: true },
@@ -722,6 +844,33 @@ export async function runSetupWizard(opts: {
       }
     }
 
+    // Add additional provider keys
+    if (anthropicKey && !process.env.ANTHROPIC_API_KEY) {
+      if (!envContent.includes("ANTHROPIC_API_KEY=")) {
+        envContent += `\nANTHROPIC_API_KEY=${anthropicKey}`;
+      }
+    }
+    if (openaiKey && !process.env.OPENAI_API_KEY) {
+      if (!envContent.includes("OPENAI_API_KEY=")) {
+        envContent += `\nOPENAI_API_KEY=${openaiKey}`;
+      }
+    }
+    if (groqKey && !process.env.GROQ_API_KEY) {
+      if (!envContent.includes("GROQ_API_KEY=")) {
+        envContent += `\nGROQ_API_KEY=${groqKey}`;
+      }
+    }
+    if (openrouterKey && !process.env.OPENROUTER_API_KEY) {
+      if (!envContent.includes("OPENROUTER_API_KEY=")) {
+        envContent += `\nOPENROUTER_API_KEY=${openrouterKey}`;
+      }
+    }
+    if (kimiKey && !process.env.MOONSHOT_API_KEY) {
+      if (!envContent.includes("MOONSHOT_API_KEY=")) {
+        envContent += `\nMOONSHOT_API_KEY=${kimiKey}`;
+      }
+    }
+
     // Add x402 commerce keys
     if (agentPrivateKey && !existingAgentKey) {
       if (!envContent.includes("AGENT_PRIVATE_KEY=")) {
@@ -760,6 +909,14 @@ export async function runSetupWizard(opts: {
         : "None";
 
     const aiDisplay = useVertexAI ? "Vertex AI (high quota)" : apiKey ? "Gemini API" : "Not configured";
+    const extraProviders: string[] = [];
+    if (anthropicKey) extraProviders.push("Anthropic");
+    if (openaiKey) extraProviders.push("OpenAI");
+    if (groqKey) extraProviders.push("Groq");
+    if (openrouterKey) extraProviders.push("OpenRouter");
+    if (kimiKey) extraProviders.push("Kimi");
+    if (ollamaUrl) extraProviders.push("Ollama");
+    const providersDisplay = extraProviders.length > 0 ? extraProviders.join(", ") : dim("None");
     const telegramDisplay = telegramToken ? green("Enabled") : dim("Not configured");
     const modeDisplay = autonomousMode
       ? chalk.yellow("⚡ Autonomous") + dim(" (auto-approve file/code ops)")
@@ -779,6 +936,7 @@ export async function runSetupWizard(opts: {
       : dim("Workspace only");
 
     console.log(`  ${dim("AI Provider:")}  ${aiDisplay}`);
+    console.log(`  ${dim("Providers:")}    ${providersDisplay}`);
     console.log(`  ${dim("Mode:")}         ${modeDisplay}`);
     console.log(`  ${dim("File System:")}  ${fsDisplay}`);
     console.log(`  ${dim("Theme:")}        ${themeDisplay}`);
