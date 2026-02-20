@@ -4,7 +4,7 @@ import boxen from "boxen";
 import stripAnsi from "strip-ansi";
 import { getTheme } from "./theme.js";
 
-export const WISPY_VERSION = "1.5.1";
+export const WISPY_VERSION = "1.6.0";
 
 // ── Ghost ASCII art (3 responsive sizes) ─────────────────
 

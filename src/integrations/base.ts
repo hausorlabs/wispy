@@ -52,6 +52,8 @@ export type IntegrationCategory =
   | "tools"
   | "media"
   | "social"
+  | "commerce"
+  | "security"
   | "built-in";
 
 export type AuthType = "oauth2" | "api-key" | "token" | "none";

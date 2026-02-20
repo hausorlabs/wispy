@@ -67,6 +67,18 @@ export const CATEGORIES: CategoryInfo[] = [
     icon: "S",
   },
   {
+    id: "commerce",
+    name: "Commerce & Payments",
+    description: "Payment processing, billing, and storefront tools",
+    icon: "$",
+  },
+  {
+    id: "security",
+    name: "Security & Secrets",
+    description: "Credential vaults, secret management, and security tools",
+    icon: "K",
+  },
+  {
     id: "built-in",
     name: "Built-in",
     description: "Core Wispy tools (always available)",

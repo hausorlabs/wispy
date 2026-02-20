@@ -1228,6 +1228,235 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
       required: [],
     },
   },
+  // === Sessions Management ===
+  {
+    name: "session_list",
+    description: "List all active agent sessions with their status, uptime, and resource usage.",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "session_create",
+    description: "Create a new named session. Sessions isolate agent context and memory.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Session name (e.g. 'research', 'coding', 'support')" },
+        instruction: { type: "string", description: "System instruction for this session's context" },
+        model: { type: "string", description: "Override model for this session (optional)" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "session_switch",
+    description: "Switch to a different named session. Preserves context of current session.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Session name to switch to" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "session_clear",
+    description: "Clear or delete a session by name. Use 'all' to reset everything.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Session name to clear, or 'all'" },
+      },
+      required: ["name"],
+    },
+  },
+  // === Process Management ===
+  {
+    name: "process_spawn",
+    description: "Spawn a long-running background process. Returns process ID for monitoring. Use for: dev servers, watchers, background tasks.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Shell command to run" },
+        name: { type: "string", description: "Friendly name for the process" },
+        cwd: { type: "string", description: "Working directory (optional)" },
+        autoRestart: { type: "boolean", description: "Restart on crash (default: false)" },
+      },
+      required: ["command", "name"],
+    },
+  },
+  {
+    name: "process_list",
+    description: "List all spawned background processes with PID, status, uptime, and resource usage.",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "process_output",
+    description: "Get recent stdout/stderr output from a background process.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Process ID or name" },
+        lines: { type: "number", description: "Number of recent lines to return (default: 50)" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "process_write",
+    description: "Write input to a background process stdin. Use for interactive processes.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Process ID or name" },
+        input: { type: "string", description: "Text to send to stdin" },
+      },
+      required: ["id", "input"],
+    },
+  },
+  {
+    name: "process_kill",
+    description: "Kill a background process by ID or name.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Process ID or name" },
+        signal: { type: "string", description: "Signal: SIGTERM (default), SIGKILL" },
+      },
+      required: ["id"],
+    },
+  },
+  // === Skills.sh Registry ===
+  {
+    name: "skills_search",
+    description: "Search the skills.sh registry for agent skills. 67,000+ skills available from the community.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query (e.g. 'web scraping', 'email', 'data analysis')" },
+        limit: { type: "number", description: "Max results to return (default: 10)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "skills_install",
+    description: "Install a skill from skills.sh registry. Downloads the SKILL.md and any required files.",
+    parameters: {
+      type: "object",
+      properties: {
+        skill: { type: "string", description: "Skill identifier: 'owner/repo' or full skills.sh URL" },
+      },
+      required: ["skill"],
+    },
+  },
+  {
+    name: "skills_uninstall",
+    description: "Uninstall a previously installed skill.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Skill name to uninstall" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "skills_installed",
+    description: "List all installed skills with their version, tools count, and source.",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
+  // === Cross-Model Delegation ===
+  {
+    name: "delegate_to_model",
+    description: "Delegate a task to a specific AI model. Wispy routes the request through the configured provider (OpenRouter, direct API, or local Ollama). Returns the model's response.",
+    parameters: {
+      type: "object",
+      properties: {
+        model: { type: "string", description: "Model identifier: 'claude-opus-4-6', 'gpt-4o', 'llama-3.3-70b', 'kimi-moonshot-v1', or any OpenRouter model slug" },
+        prompt: { type: "string", description: "The prompt/task to send to the model" },
+        systemPrompt: { type: "string", description: "Optional system prompt override" },
+        maxTokens: { type: "number", description: "Max tokens in response (default: 4096)" },
+      },
+      required: ["model", "prompt"],
+    },
+  },
+  {
+    name: "model_compare",
+    description: "Send the same prompt to multiple models and compare responses. Useful for verification and consensus.",
+    parameters: {
+      type: "object",
+      properties: {
+        models: { type: "string", description: "Comma-separated model identifiers (e.g. 'claude-opus-4-6,gpt-4o,gemini-2.5-pro')" },
+        prompt: { type: "string", description: "The prompt to send to all models" },
+      },
+      required: ["models", "prompt"],
+    },
+  },
+  // === Enhanced Commerce (x402 Cross-Model) ===
+  {
+    name: "x402_budget_set",
+    description: "Set spending budgets for x402 payments. Configure per-transaction limits, daily caps, and auto-approve thresholds.",
+    parameters: {
+      type: "object",
+      properties: {
+        dailyLimit: { type: "number", description: "Maximum USDC to spend per day" },
+        maxPerTransaction: { type: "number", description: "Maximum USDC per single transaction" },
+        autoApproveBelow: { type: "number", description: "Auto-approve payments below this amount (USDC)" },
+      },
+    },
+  },
+  {
+    name: "x402_history",
+    description: "View detailed x402 payment history with filters. Shows all transactions across all models and services.",
+    parameters: {
+      type: "object",
+      properties: {
+        filter: { type: "string", description: "Filter: 'today', 'week', 'month', 'all' (default: today)" },
+        service: { type: "string", description: "Filter by service name (optional)" },
+      },
+    },
+  },
+  {
+    name: "wallet_fund",
+    description: "Get instructions to fund the agent wallet. Shows QR code, address, and supported funding methods (direct transfer, Coinbase, faucets).",
+    parameters: {
+      type: "object",
+      properties: {
+        amount: { type: "string", description: "Suggested amount to fund (e.g. '10 USDC')" },
+      },
+    },
+  },
+  // === Proactive Agent Features ===
+  {
+    name: "agent_goal_set",
+    description: "Set a persistent goal for the agent. The agent will work towards this goal proactively using scheduled tasks and available tools.",
+    parameters: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "The goal description (e.g. 'Monitor my portfolio and alert me to significant changes')" },
+        priority: { type: "string", description: "Priority: low, medium, high, critical (default: medium)" },
+        deadline: { type: "string", description: "Optional deadline (e.g. 'by end of day', 'next week')" },
+      },
+      required: ["goal"],
+    },
+  },
+  {
+    name: "agent_goals_list",
+    description: "List all active agent goals with their status and progress.",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 export function getToolDeclarations(

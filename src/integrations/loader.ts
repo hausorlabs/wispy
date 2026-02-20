@@ -126,6 +126,35 @@ async function importAllIntegrations(ctx: IntegrationContext): Promise<Integrati
   await importSafe("./social/twitter.js");
   await importSafe("./social/email-smtp.js");
   await importSafe("./social/zoho-email.js");
+  await importSafe("./social/linkedin.js");
+  await importSafe("./social/instagram.js");
+  await importSafe("./social/reddit.js");
+
+  // Chat (extended)
+  await importSafe("./chat/signal.js");
+  await importSafe("./chat/matrix.js");
+  await importSafe("./chat/msteams.js");
+
+  // Productivity (extended)
+  await importSafe("./productivity/trello.js");
+  await importSafe("./productivity/asana.js");
+  await importSafe("./productivity/calendly.js");
+
+  // Media
+  await importSafe("./media/image-gen.js");
+  await importSafe("./media/camera.js");
+
+  // Smart Home (extended)
+  await importSafe("./smart-home/sonos.js");
+
+  // Commerce
+  await importSafe("./commerce/stripe.js");
+
+  // Security
+  await importSafe("./security/onepassword.js");
+
+  // Canvas (drawing / whiteboard)
+  await importSafe("./tools/canvas.js");
 
   // Agentic Commerce (x402 hackathon)
   await importSafe("./agentic-commerce/index.js");
