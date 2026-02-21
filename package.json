@@ -14,6 +14,7 @@
     "wispy/",
     ".env.example",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -37,30 +38,36 @@
     "ai",
     "agent",
     "gemini",
-    "gemini-3",
     "autonomous",
     "cli",
     "multi-agent",
+    "multi-model",
     "marathon",
-    "long-running",
-    "thinking",
-    "voice",
-    "mcp",
+    "sessions",
+    "process-manager",
+    "skills",
+    "cross-model",
+    "openrouter",
+    "telegram",
+    "discord",
+    "slack",
+    "whatsapp",
+    "x402",
+    "browser-automation",
     "integrations",
-    "google",
-    "wispy",
-    "action-era",
-    "self-correcting"
+    "mcp",
+    "thinking",
+    "wispy"
   ],
   "author": "Brian Mwai",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/brn-mwai/wispy.git"
+    "url": "https://github.com/hausorlabs/wispy.git"
   },
   "homepage": "https://wispy.cc",
   "bugs": {
-    "url": "https://github.com/brn-mwai/wispy/issues"
+    "url": "https://github.com/hausorlabs/wispy/issues"
   },
   "dependencies": {
     "@coinbase/coinbase-sdk": "^0.25.0",
