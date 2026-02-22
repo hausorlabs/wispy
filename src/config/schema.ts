@@ -53,6 +53,8 @@ export interface WispyConfig {
     matrix?: { enabled: boolean; homeserver?: string; accessToken?: string };
     web?: { enabled: boolean; port: number };
     rest?: { enabled: boolean; port: number; bearerToken?: string };
+    email?: { enabled: boolean; port?: number; webhookSecret?: string };
+    phone?: { enabled: boolean; port?: number; webhookSecret?: string; webhookHost?: string };
   };
   memory: {
     embeddingDimensions: number;
@@ -101,7 +103,7 @@ export interface WispyConfig {
   // Voice AI configuration
   voice?: {
     enabled: boolean;
-    model: "parler-tts" | "bark" | "melo-tts" | "speecht5" | "gemini" | "piper" | "auto";
+    model: "parler-tts" | "bark" | "melo-tts" | "speecht5" | "gemini" | "piper" | "elevenlabs" | "auto";
     voicePreset?: string;  // Voice name/description
     language?: string;     // Language code (en, es, fr, etc.)
     speed?: number;        // Speech rate (0.5-2.0)
@@ -349,6 +351,27 @@ const configSchema = {
             enabled: { type: "boolean" },
             port: { type: "integer" },
             bearerToken: { type: "string", nullable: true },
+          },
+        },
+        email: {
+          type: "object",
+          nullable: true,
+          required: ["enabled"],
+          properties: {
+            enabled: { type: "boolean" },
+            port: { type: "integer", nullable: true },
+            webhookSecret: { type: "string", nullable: true },
+          },
+        },
+        phone: {
+          type: "object",
+          nullable: true,
+          required: ["enabled"],
+          properties: {
+            enabled: { type: "boolean" },
+            port: { type: "integer", nullable: true },
+            webhookSecret: { type: "string", nullable: true },
+            webhookHost: { type: "string", nullable: true },
           },
         },
       },

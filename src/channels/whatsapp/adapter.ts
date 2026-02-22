@@ -7,6 +7,7 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   makeCacheableSignalKeyStore,
+  downloadMediaMessage,
   WASocket,
   BaileysEventMap,
   proto,
@@ -15,7 +16,12 @@ import { Boom } from "@hapi/boom";
 import { existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import qrcode from "qrcode-terminal";
-import { registerChannel, updateChannelStatus } from "../dock.js";
+import {
+  registerChannel,
+  updateChannelStatus,
+  registerChannelDispatcher,
+  broadcastChannelEvent,
+} from "../dock.js";
 import { isPaired, pairUser } from "../../security/auth.js";
 import type { Agent } from "../../core/agent.js";
 import { createLogger } from "../../infra/logger.js";
@@ -30,6 +36,10 @@ let sockInstance: WASocket | null = null;
 let marathonService: MarathonService | null = null;
 let agentInstance: Agent | null = null;
 let apiKeyInstance: string | null = null;
+let runtimeDirInstance: string = "";
+
+// Per-user voice reply preference (default: OFF, toggle with !voice)
+const voiceReplyEnabled = new Map<string, boolean>();
 
 /**
  * Send a message to a specific JID (for notifications)
@@ -44,6 +54,32 @@ export async function sendWhatsAppMessage(jid: string, message: string): Promise
     return true;
   } catch (err) {
     log.error({ err }, "Failed to send WhatsApp message");
+    return false;
+  }
+}
+
+/**
+ * Send a voice note to a specific JID.
+ * Accepts an audio Buffer. Sends as push-to-talk voice note.
+ */
+export async function sendWhatsAppVoice(
+  jid: string,
+  audioBuffer: Buffer,
+  mimetype: string = "audio/ogg; codecs=opus"
+): Promise<boolean> {
+  if (!sockInstance) {
+    log.warn("WhatsApp not connected, cannot send voice");
+    return false;
+  }
+  try {
+    await sockInstance.sendMessage(jid, {
+      audio: audioBuffer,
+      mimetype,
+      ptt: true,
+    });
+    return true;
+  } catch (err) {
+    log.error({ err }, "Failed to send WhatsApp voice note");
     return false;
   }
 }
@@ -122,7 +158,8 @@ async function processCommand(
   sock: WASocket,
   jid: string,
   text: string,
-  runtimeDir: string
+  runtimeDir: string,
+  options?: { isVoice?: boolean }
 ): Promise<void> {
   const senderId = jid.replace(/@s\.whatsapp\.net$/, "");
 
@@ -131,7 +168,7 @@ async function processCommand(
     // Auto-pair on first message
     pairUser(runtimeDir, "whatsapp", senderId);
     await sock.sendMessage(jid, {
-      text: `☁️ *Welcome to Wispy!*\n\nYour autonomous AI companion.\n\n*Chat Commands:*\nJust send any message to chat!\n\n*Marathon Commands:*\n!marathon <goal> - Start autonomous task\n!status - Check marathon progress\n!pause - Pause current marathon\n!resume - Resume paused marathon\n!abort - Stop current marathon\n!list - View all marathons\n\n*Example:*\n!marathon Build a React calculator app`,
+      text: `☁️ *Welcome to Wispy!*\n\nYour autonomous AI companion.\n\n*Chat Commands:*\nJust send any message to chat!\n!voice - Toggle voice replies\n!call +number - Make a phone call\n\n*Marathon Commands:*\n!marathon <goal> - Start autonomous task\n!status - Check marathon progress\n!pause - Pause current marathon\n!resume - Resume paused marathon\n!abort - Stop current marathon\n!list - View all marathons\n\n*Example:*\n!marathon Build a React calculator app`,
     });
     return;
   }
@@ -275,24 +312,107 @@ async function processCommand(
   // !help - Show help
   if (lowerText === "!help") {
     await sock.sendMessage(jid, {
-      text: `☁️ *Wispy Help*\n\n*Chat:* Just send any message!\n\n*Marathon Commands:*\n!marathon <goal> - Start autonomous task\n!status - Check marathon progress\n!pause - Pause current marathon\n!resume - Resume paused marathon\n!abort - Stop current marathon\n!list - View all marathons\n!help - Show this help\n\n*Example:*\n!marathon Build a blog with Next.js`,
+      text: `☁️ *Wispy Help*\n\n*Chat:* Just send any message!\n!voice - Toggle voice replies\n!call +number - Make a phone call\n\n*Marathon Commands:*\n!marathon <goal> - Start autonomous task\n!status - Check marathon progress\n!pause - Pause current marathon\n!resume - Resume paused marathon\n!abort - Stop current marathon\n!list - View all marathons\n!help - Show this help\n\n*Example:*\n!marathon Build a blog with Next.js`,
     });
+    return;
+  }
+
+  // !voice - Toggle voice replies
+  if (lowerText === "!voice") {
+    const currentSetting = voiceReplyEnabled.get(senderId) ?? false;
+    const newSetting = !currentSetting;
+    voiceReplyEnabled.set(senderId, newSetting);
+
+    if (newSetting) {
+      await sock.sendMessage(jid, {
+        text: "🎤 *Voice Replies: ON*\n\nI'll respond with voice messages when you send voice notes!\n\nSend !voice again to turn off.",
+      });
+    } else {
+      await sock.sendMessage(jid, {
+        text: "📝 *Voice Replies: OFF*\n\nI'll respond with text only.\n\nSend !voice to turn voice replies back on.",
+      });
+    }
+    return;
+  }
+
+  // !call <number> - Place an outbound phone call
+  if (lowerText.startsWith("!call ")) {
+    const phoneNumber = text.replace(/^!call\s*/i, "").trim();
+    if (!phoneNumber.match(/^\+\d{7,15}$/)) {
+      await sock.sendMessage(jid, { text: "Please use E.164 format: !call +1234567890" });
+      return;
+    }
+    if (!process.env.TELNYX_API_KEY) {
+      await sock.sendMessage(jid, { text: "Phone calls require TELNYX_API_KEY. Set it in your .env file." });
+      return;
+    }
+    await sock.sendMessage(jid, { text: `Calling ${phoneNumber}...` });
+    const { makeOutboundCall } = await import("../phone/adapter.js");
+    const result = await makeOutboundCall(phoneNumber, undefined, jid);
+    if (!result.success) {
+      await sock.sendMessage(jid, { text: `Call failed: ${result.error}` });
+    }
     return;
   }
 
   // Regular chat message
   if (!text.startsWith("!")) {
+    const isVoiceInput = options?.isVoice === true;
     try {
       // Send typing indicator
       await sock.presenceSubscribe(jid);
       await sock.sendPresenceUpdate("composing", jid);
 
-      const result = await agentInstance!.chat(text, senderId, "whatsapp", "main");
+      // Inject conversational voice prompt if response will be voice
+      const userVoiceEnabled = voiceReplyEnabled.get(senderId) ?? false;
+      const shouldReplyVoice = userVoiceEnabled && isVoiceInput;
+
+      let messageToSend = text;
+      if (shouldReplyVoice) {
+        const { getVoicePromptAddendum } = await import("../../ai/prompts.js");
+        messageToSend = `${getVoicePromptAddendum()}\n\n${text}`;
+      }
+
+      const result = await agentInstance!.chat(messageToSend, senderId, "whatsapp", "main");
 
       await sock.sendPresenceUpdate("paused", jid);
 
-      // Send response
       const responseText = result.text || "...";
+
+      // Voice reply path
+      if (shouldReplyVoice && responseText.length < 500) {
+        try {
+          const { generateElevenLabsBuffer } = await import("../../cli/voice/tts.js");
+
+          // Try ElevenLabs buffer directly (no file I/O for WhatsApp)
+          const voiceBuffer = await generateElevenLabsBuffer(responseText);
+
+          if (voiceBuffer) {
+            await sendWhatsAppVoice(jid, voiceBuffer, "audio/mpeg");
+            await sock.sendMessage(jid, { text: responseText });
+            return;
+          }
+
+          // Fallback: Gemini TTS (returns file path)
+          const { generateVoiceWithGemini } = await import("../../cli/voice/tts.js");
+          const { join } = await import("path");
+          const voiceDir = join(runtimeDirInstance || runtimeDir, "voice-output");
+          const audioPath = await generateVoiceWithGemini(responseText, voiceDir);
+
+          if (audioPath) {
+            const { readFileSync, unlinkSync } = await import("fs");
+            const audioFileBuffer = readFileSync(audioPath);
+            await sendWhatsAppVoice(jid, audioFileBuffer, "audio/ogg; codecs=opus");
+            await sock.sendMessage(jid, { text: responseText });
+            try { unlinkSync(audioPath); } catch {}
+            return;
+          }
+        } catch (voiceErr) {
+          log.debug("Voice reply failed, falling back to text: %s", voiceErr);
+        }
+      }
+
+      // Text reply (default path)
       await sock.sendMessage(jid, { text: responseText });
     } catch (err) {
       log.error({ err }, "WhatsApp chat error");
@@ -312,6 +432,7 @@ export async function startWhatsApp(agent: Agent, runtimeDir: string, apiKey?: s
   // Store global instances
   agentInstance = agent;
   apiKeyInstance = apiKey || process.env.GEMINI_API_KEY || "";
+  runtimeDirInstance = runtimeDir;
   marathonService = new MarathonService(runtimeDir);
 
   // Use multi-file auth state
@@ -374,6 +495,12 @@ export async function startWhatsApp(agent: Agent, runtimeDir: string, apiKey?: s
           connectedAt: new Date().toISOString(),
         });
 
+        // Register cross-channel dispatcher
+        registerChannelDispatcher("whatsapp", {
+          sendMessage: sendWhatsAppMessage,
+          sendImage: async () => false,
+        });
+
         console.log("\n✅ WhatsApp connected successfully!\n");
       }
     });
@@ -388,16 +515,77 @@ export async function startWhatsApp(agent: Agent, runtimeDir: string, apiKey?: s
       // Skip if not a new message or from ourselves
       if (!msg.message || msg.key.fromMe) return;
 
-      // Get message text
+      const jid = msg.key.remoteJid;
+      if (!jid) return;
+
+      // ── Voice message handling ──────────────────────────
+      if (msg.message.audioMessage) {
+        try {
+          log.info({ from: jid }, "Received WhatsApp voice message");
+
+          // Download audio buffer from WhatsApp servers
+          const audioBuffer = await downloadMediaMessage(
+            msg,
+            "buffer",
+            {}
+          ) as Buffer;
+
+          // Convert to base64 for Gemini transcription
+          const audioBase64 = audioBuffer.toString("base64");
+
+          // Transcribe with Gemini (same pattern as Telegram adapter)
+          const { getClient } = await import("../../ai/gemini.js");
+          const ai = getClient();
+
+          const transcribeResult = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{
+              role: "user",
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: "audio/ogg",
+                    data: audioBase64,
+                  },
+                },
+                { text: "Transcribe this voice message exactly. Return only the transcription, nothing else." },
+              ],
+            }],
+          });
+
+          const transcription = transcribeResult.text?.trim() || "";
+
+          if (!transcription) {
+            await sock.sendMessage(jid, { text: "Sorry, I couldn't understand the voice message. Please try again." });
+            return;
+          }
+
+          log.info({ from: jid, transcription: transcription.slice(0, 50) }, "Transcribed voice message");
+
+          // Broadcast voice event to other channels
+          broadcastChannelEvent({
+            type: "message",
+            source: "whatsapp",
+            data: { text: transcription, userId: jid.replace(/@s\.whatsapp\.net$/, ""), isVoice: true },
+            timestamp: new Date().toISOString(),
+          });
+
+          // Route through processCommand with voice flag
+          await processCommand(sock, jid, transcription, runtimeDir, { isVoice: true });
+        } catch (err) {
+          log.error({ err }, "WhatsApp voice message error");
+          await sock.sendMessage(jid, { text: "Sorry, I couldn't process your voice message. Please try again or send text." });
+        }
+        return;
+      }
+
+      // ── Text message handling ──────────────────────────
       const messageText =
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
         "";
 
       if (!messageText) return;
-
-      const jid = msg.key.remoteJid;
-      if (!jid) return;
 
       log.info({ from: jid, text: messageText.slice(0, 50) }, "Received WhatsApp message");
 

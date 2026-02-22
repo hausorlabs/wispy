@@ -591,6 +591,7 @@ Your autonomous AI agent. Just talk naturally!
 *Voice Notes:* 🎤
 Send voice messages and I'll respond!
 /voice - Toggle voice replies
+/call +number - Make a phone call
 
 *Image Generation:*
 /image <description> - Generate AI images
@@ -2088,6 +2089,32 @@ I work autonomously and keep you updated! 🚀`;
     }
   });
 
+  // /call <number> - Place an outbound phone call
+  bot.command("call", async (ctx: Context) => {
+    const userId = String(ctx.from?.id || "");
+
+    if (!isPaired(runtimeDir, "telegram", userId)) {
+      await ctx.reply("Please send /start first to pair with Wispy.");
+      return;
+    }
+
+    const phoneNumber = (ctx.message?.text || "").replace(/^\/call\s*/i, "").trim();
+    if (!phoneNumber.match(/^\+\d{7,15}$/)) {
+      await ctx.reply("Usage: `/call +1234567890`", { parse_mode: "Markdown" });
+      return;
+    }
+    if (!process.env.TELNYX_API_KEY) {
+      await ctx.reply("Phone calls require TELNYX_API_KEY.");
+      return;
+    }
+    await ctx.reply(`Calling ${phoneNumber}...`);
+    const { makeOutboundCall } = await import("../phone/adapter.js");
+    const result = await makeOutboundCall(phoneNumber, undefined, userId);
+    if (!result.success) {
+      await ctx.reply(`Call failed: ${result.error}`);
+    }
+  });
+
   // ==============================================
   // x402 / WALLET / COMMERCE COMMANDS
   // ==============================================
@@ -2458,6 +2485,7 @@ I work autonomously and keep you updated! 🚀`;
       "*Utilities*\n" +
       "/image \u2014 Generate image\n" +
       "/voice \u2014 Toggle voice replies\n" +
+      "/call \u2014 Make a phone call\n" +
       "/channels \u2014 Connected channels\n" +
       "/tools \u2014 Available tools\n" +
       "/skills \u2014 Loaded skills\n" +
@@ -2835,8 +2863,16 @@ I work autonomously and keep you updated! 🚀`;
         timestamp: new Date().toISOString(),
       });
 
+      // Inject conversational tone when voice reply is enabled
+      const userVoiceOn = voiceReplyEnabled.get(userId) ?? false;
+      let voiceMessage = transcription;
+      if (userVoiceOn) {
+        const { getVoicePromptAddendum } = await import("../../ai/prompts.js");
+        voiceMessage = `${getVoicePromptAddendum()}\n\n${transcription}`;
+      }
+
       // Now process the transcribed text through the agent
-      const result = await agent.chat(transcription, userId, "telegram", "main");
+      const result = await agent.chat(voiceMessage, userId, "telegram", "main");
 
       // Broadcast agent response to CLI
       if (result.text) {
@@ -3234,8 +3270,8 @@ I work autonomously and keep you updated! 🚀`;
       }
 
       if (userRequestedVoice) {
-        // Simple instruction - don't over-explain
-        messageToSend = `${messageToSend}\n\n[Use voice_reply tool once with a friendly, conversational response.]`;
+        const { getVoicePromptAddendum } = await import("../../ai/prompts.js");
+        messageToSend = `${getVoicePromptAddendum()}\n\n${messageToSend}\n\n[Use voice_reply tool once with a friendly, conversational response.]`;
         log.info("Voice request detected");
       }
 
