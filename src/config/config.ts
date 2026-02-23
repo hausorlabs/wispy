@@ -60,8 +60,14 @@ export function loadConfig(runtimeDir: string): WispyConfig {
 
   const valid = validateConfig(raw);
   if (!valid) {
-    log.error({ errors: validateConfig.errors }, "Invalid config, using defaults");
-    return DEFAULT_CONFIG;
+    log.warn({ errors: validateConfig.errors }, "Config validation warnings, merging with defaults");
+    // Merge with defaults instead of throwing away user config entirely
+    raw.agent ??= DEFAULT_CONFIG.agent;
+    raw.gemini ??= DEFAULT_CONFIG.gemini;
+    raw.gemini.models ??= DEFAULT_CONFIG.gemini.models;
+    raw.channels ??= DEFAULT_CONFIG.channels;
+    raw.memory ??= DEFAULT_CONFIG.memory;
+    raw.security ??= DEFAULT_CONFIG.security;
   }
 
   // Merge env overrides

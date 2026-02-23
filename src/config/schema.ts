@@ -74,7 +74,7 @@ export interface WispyConfig {
   wallet?: {
     enabled: boolean;
     chain: string;
-    autoPayThreshold: number;
+    autoPayThreshold?: number;
     commerce?: {
       maxPerTransaction?: number;
       dailyLimit?: number;
@@ -113,7 +113,7 @@ export interface WispyConfig {
   // Voice AI configuration
   voice?: {
     enabled: boolean;
-    model: "parler-tts" | "bark" | "melo-tts" | "speecht5" | "gemini" | "piper" | "elevenlabs" | "auto";
+    model: "edge-tts" | "qwen3-tts" | "parler-tts" | "bark" | "melo-tts" | "speecht5" | "gemini" | "piper" | "elevenlabs" | "auto";
     voicePreset?: string;  // Voice name/description
     language?: string;     // Language code (en, es, fr, etc.)
     speed?: number;        // Speech rate (0.5-2.0)
@@ -418,11 +418,11 @@ const configSchema = {
     wallet: {
       type: "object",
       nullable: true,
-      required: ["enabled", "chain", "autoPayThreshold"],
+      required: ["enabled", "chain"],
       properties: {
         enabled: { type: "boolean" },
         chain: { type: "string" },
-        autoPayThreshold: { type: "number" },
+        autoPayThreshold: { type: "number", nullable: true },
         commerce: {
           type: "object",
           nullable: true,
@@ -480,12 +480,28 @@ const configSchema = {
         chromeExtension: { type: "boolean", nullable: true },
       },
     },
+    voice: {
+      type: "object",
+      nullable: true,
+      properties: {
+        enabled: { type: "boolean", nullable: true },
+        model: {
+          type: "string",
+          nullable: true,
+          enum: ["edge-tts", "qwen3-tts", "parler-tts", "bark", "melo-tts", "speecht5", "gemini", "piper", "elevenlabs", "auto"],
+        },
+        voicePreset: { type: "string", nullable: true },
+        language: { type: "string", nullable: true },
+        speed: { type: "number", nullable: true },
+        replyWithVoice: { type: "boolean", nullable: true },
+      },
+    },
     theme: { type: "string", nullable: true },
     agents: { type: "array", nullable: true, items: { type: "string" } },
     integrations: { type: "array", nullable: true, items: { type: "string" } },
     plugins: { type: "array", nullable: true, items: { type: "string" } },
   },
-  additionalProperties: false,
+  additionalProperties: true,
 };
 
 const ajv = new Ajv({ allErrors: true });

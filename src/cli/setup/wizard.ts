@@ -786,6 +786,14 @@ export async function runSetupWizard(opts: {
         if (agentPrivateKey) {
           commerceEnabled = true;
           env.AGENT_PRIVATE_KEY = agentPrivateKey;
+
+          // Set SKALE defaults
+          if (!envOrEmpty("SKALE_RPC")) {
+            env.SKALE_RPC = "https://mainnet.skalenodes.com/v1/elated-tan-skat";
+          }
+          if (!envOrEmpty("USDC_CONTRACT")) {
+            env.USDC_CONTRACT = "0x7Cf76E740Cb23b99337b21F392F22c47Ad68C89B";
+          }
         }
 
         // Optional CDP wallet
@@ -1039,7 +1047,17 @@ export async function runSetupWizard(opts: {
         ...(ollamaUrl ? { ollama: { baseUrl: ollamaUrl } } : {}),
       },
       browser: { enabled: true },
-      wallet: { enabled: commerceEnabled, chain: "skale-bite-sandbox" },
+      wallet: {
+        enabled: commerceEnabled,
+        chain: "skale-bite-sandbox",
+        autoPayThreshold: 0.10,
+        commerce: {
+          maxPerTransaction: 1.0,
+          dailyLimit: 10.0,
+          autoApproveBelow: 0.10,
+          requireApprovalAbove: 0.10,
+        },
+      },
       memory: { embeddingDimensions: 768, heartbeatIntervalMinutes: 30, hybridSearch: true },
       security: {
         requireApprovalForExternal: !autonomousMode,
@@ -1121,8 +1139,10 @@ export async function runSetupWizard(opts: {
       }
     }
 
-    // Commerce
-    if (agentPrivateKey && !envOrEmpty("AGENT_PRIVATE_KEY")) addEnv("AGENT_PRIVATE_KEY", agentPrivateKey, "x402 Commerce");
+    // Commerce (SKALE x402)
+    if (agentPrivateKey && !envOrEmpty("AGENT_PRIVATE_KEY")) addEnv("AGENT_PRIVATE_KEY", agentPrivateKey, "x402 Commerce (SKALE)");
+    if (env.SKALE_RPC) addEnv("SKALE_RPC", env.SKALE_RPC);
+    if (env.USDC_CONTRACT) addEnv("USDC_CONTRACT", env.USDC_CONTRACT);
     if (cdpKeyName) addEnv("CDP_API_KEY_NAME", cdpKeyName);
     if (cdpPrivateKey) addEnv("CDP_PRIVATE_KEY", cdpPrivateKey);
 
