@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.7.0] - 2026-02-23
+
+### Added
+- **Claude Engine** as switchable alternative to Gemini via `@anthropic-ai/sdk`
+- **Engine Abstraction Layer** (`src/ai/engine.ts`) for seamless switching between Gemini and Claude
+- **Memory Bank** skill with 4 typed categories: episodic, semantic, procedural, preference
+- Memory lifecycle management: decay (time-based), reinforcement (access-based), reflection (AI consolidation)
+- 5 new Memory Bank tools: `memory_store_typed`, `memory_reflect`, `memory_forget`, `memory_list_categories`, `memory_get_context`
+- Context-aware memory injection into system prompts
+- Claude extended thinking support with budget token mapping
+- Claude tool_use format conversion from Gemini function declarations
+
+### Changed
+- Project structure cleaned up: tests moved to `tests/integration/`, scripts to `scripts/`, docs to `docs/submissions/`
+- Removed unused stubs (`database/`, `backend/`)
+- Heartbeat now runs Memory Bank decay cycle
+- Router supports Claude model selection (Sonnet for reasoning, Haiku for fast)
+- Engine configurable via `ENGINE=gemini|claude` env var
+
 ## [1.6.0] - 2026-02-20
 
 ### Added

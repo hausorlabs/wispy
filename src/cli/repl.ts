@@ -260,6 +260,26 @@ export async function startRepl(opts: ReplOpts) {
     }
   });
 
+  // Start Email channel if configured
+  if (config.channels.email?.enabled && process.env.AGENTMAIL_API_KEY) {
+    try {
+      const { startEmailChannel } = await import("../channels/email/adapter.js");
+      startEmailChannel(agent, runtimeDir, config.channels.email.port);
+    } catch (err) {
+      logger.warn("Email channel failed to start: %s", err);
+    }
+  }
+
+  // Start Phone channel if configured
+  if (config.channels.phone?.enabled && process.env.TELNYX_API_KEY) {
+    try {
+      const { startPhoneChannel } = await import("../channels/phone/adapter.js");
+      startPhoneChannel(agent, runtimeDir, config.channels.phone.port);
+    } catch (err) {
+      logger.warn("Phone channel failed to start: %s", err);
+    }
+  }
+
   const history = new CliHistory(runtimeDir);
   const tokenManager = new TokenManager();
   let currentSession = "cli-repl";

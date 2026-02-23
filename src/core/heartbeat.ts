@@ -55,10 +55,20 @@ export class HeartbeatRunner {
       // 1. Sync recent sessions to memory
       await this.syncSessions(state);
 
-      // 2. Write daily note
+      // 2. Memory Bank decay — remove stale memories
+      try {
+        const { MemoryBank } = await import("../memory/memory-bank.js");
+        const bank = new MemoryBank(this.runtimeDir, this.config);
+        const decayed = bank.decay();
+        if (decayed > 0) {
+          log.info("Memory Bank decayed %d stale memories", decayed);
+        }
+      } catch { /* non-fatal */ }
+
+      // 3. Write daily note
       appendDailyNote(this.soulDir, "Heartbeat tick completed");
 
-      // 3. Update state
+      // 4. Update state
       state.lastRun = new Date().toISOString();
       saveHeartbeatState(this.soulDir, state);
 

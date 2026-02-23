@@ -15,6 +15,9 @@ export interface StoredDocument {
   sessionKey?: string;
   metadata?: Record<string, unknown>;
   createdAt: string;
+  accessCount?: number;
+  lastAccessed?: string;
+  decayFactor?: number;
 }
 
 export class VectorStore {
@@ -52,6 +55,17 @@ export class VectorStore {
     } catch {
       // Column already exists
     }
+
+    // Migration: Add memory-bank columns
+    try {
+      this.db.exec(`ALTER TABLE embeddings ADD COLUMN access_count INTEGER DEFAULT 0`);
+    } catch { /* already exists */ }
+    try {
+      this.db.exec(`ALTER TABLE embeddings ADD COLUMN last_accessed TEXT`);
+    } catch { /* already exists */ }
+    try {
+      this.db.exec(`ALTER TABLE embeddings ADD COLUMN decay_factor REAL DEFAULT 1.0`);
+    } catch { /* already exists */ }
 
     // Create expires index (safe now that column exists)
     try {
@@ -267,6 +281,151 @@ export class VectorStore {
   deleteBySource(source: string): number {
     const result = this.db.prepare(`DELETE FROM embeddings WHERE source = ?`).run(source);
     return result.changes;
+  }
+
+  // ── Memory Bank Methods ─────────────────────────────────────────────
+
+  /**
+   * Get a single document by ID.
+   */
+  getById(id: number): StoredDocument | null {
+    const row = this.db.prepare(
+      `SELECT id, text, embedding, source, session_key, metadata, created_at, access_count, last_accessed, decay_factor
+       FROM embeddings WHERE id = ?`
+    ).get(id) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      text: row.text,
+      embedding: JSON.parse(row.embedding),
+      source: row.source,
+      sessionKey: row.session_key,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      createdAt: row.created_at,
+      accessCount: row.access_count ?? 0,
+      lastAccessed: row.last_accessed,
+      decayFactor: row.decay_factor ?? 1.0,
+    };
+  }
+
+  /**
+   * Increment access count and update last_accessed timestamp.
+   */
+  incrementAccessCount(id: number): void {
+    this.db.prepare(
+      `UPDATE embeddings SET access_count = access_count + 1, last_accessed = datetime('now') WHERE id = ?`
+    ).run(id);
+  }
+
+  /**
+   * Update decay factor for a memory.
+   */
+  updateDecayFactor(id: number, factor: number): void {
+    this.db.prepare(
+      `UPDATE embeddings SET decay_factor = ? WHERE id = ?`
+    ).run(factor, id);
+  }
+
+  /**
+   * Delete memories by a list of IDs.
+   */
+  deleteByIds(ids: number[]): number {
+    if (ids.length === 0) return 0;
+    const placeholders = ids.map(() => "?").join(",");
+    const result = this.db.prepare(
+      `DELETE FROM embeddings WHERE id IN (${placeholders})`
+    ).run(...ids);
+    return result.changes;
+  }
+
+  /**
+   * Find similar documents by cosine similarity above a threshold.
+   * Returns pairs of (id, id, similarity) for deduplication.
+   */
+  findSimilar(threshold: number = 0.9): Array<{ idA: number; idB: number; similarity: number }> {
+    const rows = this.db.prepare(
+      `SELECT id, embedding FROM embeddings WHERE embedding != '[]'`
+    ).all() as Array<{ id: number; embedding: string }>;
+
+    const parsed = rows.map(r => ({
+      id: r.id,
+      embedding: JSON.parse(r.embedding) as number[],
+    }));
+
+    const pairs: Array<{ idA: number; idB: number; similarity: number }> = [];
+
+    for (let i = 0; i < parsed.length; i++) {
+      for (let j = i + 1; j < parsed.length; j++) {
+        const sim = cosineSimilarity(parsed[i].embedding, parsed[j].embedding);
+        if (sim >= threshold) {
+          pairs.push({ idA: parsed[i].id, idB: parsed[j].id, similarity: sim });
+        }
+      }
+    }
+
+    return pairs;
+  }
+
+  /**
+   * Search with full document info (including IDs for reinforcement).
+   */
+  searchFull(queryEmbedding: number[], limit: number = 5): Array<StoredDocument & { score: number }> {
+    const rows = this.db.prepare(
+      `SELECT id, text, embedding, source, session_key, metadata, created_at, access_count, last_accessed, decay_factor
+       FROM embeddings WHERE embedding != '[]'`
+    ).all() as Array<any>;
+
+    if (queryEmbedding.length === 0) return [];
+
+    const results = rows.map((row) => {
+      const emb = JSON.parse(row.embedding) as number[];
+      const score = cosineSimilarity(queryEmbedding, emb);
+      return {
+        id: row.id,
+        text: row.text,
+        embedding: emb,
+        source: row.source,
+        sessionKey: row.session_key,
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        createdAt: row.created_at,
+        accessCount: row.access_count ?? 0,
+        lastAccessed: row.last_accessed,
+        decayFactor: row.decay_factor ?? 1.0,
+        score,
+      };
+    });
+
+    results.sort((a, b) => b.score - a.score);
+    return results.slice(0, limit);
+  }
+
+  /**
+   * Get all documents with their IDs (for decay processing).
+   */
+  getAllWithIds(): Array<{
+    id: number;
+    text: string;
+    source: string;
+    metadata?: Record<string, unknown>;
+    createdAt: string;
+    accessCount: number;
+    lastAccessed: string | null;
+    decayFactor: number;
+  }> {
+    const rows = this.db.prepare(
+      `SELECT id, text, source, metadata, created_at, access_count, last_accessed, decay_factor FROM embeddings`
+    ).all() as Array<any>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      text: row.text,
+      source: row.source,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      createdAt: row.created_at,
+      accessCount: row.access_count ?? 0,
+      lastAccessed: row.last_accessed,
+      decayFactor: row.decay_factor ?? 1.0,
+    }));
   }
 
   /**

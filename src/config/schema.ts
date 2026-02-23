@@ -17,6 +17,16 @@ export interface WispyConfig {
     name: string;
     id: string;
   };
+  // Engine selection: which AI backend drives the agent
+  engine?: "gemini" | "claude";
+  // Claude configuration (used when engine="claude")
+  claude?: {
+    apiKey?: string;
+    models?: {
+      reasoning?: string;  // e.g. claude-sonnet-4-20250514
+      fast?: string;       // e.g. claude-haiku-4-5-20251001
+    };
+  };
   // Primary provider (Gemini by default)
   gemini: {
     apiKey?: string;
@@ -264,6 +274,26 @@ const configSchema = {
                 vision: { type: "string", nullable: true },
               },
             },
+          },
+        },
+      },
+    },
+    engine: {
+      type: "string",
+      nullable: true,
+      enum: ["gemini", "claude"],
+    },
+    claude: {
+      type: "object",
+      nullable: true,
+      properties: {
+        apiKey: { type: "string", nullable: true },
+        models: {
+          type: "object",
+          nullable: true,
+          properties: {
+            reasoning: { type: "string", nullable: true },
+            fast: { type: "string", nullable: true },
           },
         },
       },

@@ -69,6 +69,22 @@ export function loadConfig(runtimeDir: string): WispyConfig {
     raw.gemini.apiKey = process.env.GEMINI_API_KEY;
   }
 
+  // Engine override
+  if (process.env.ENGINE === "gemini" || process.env.ENGINE === "claude") {
+    raw.engine = process.env.ENGINE;
+  }
+
+  // Claude overrides
+  if (process.env.ANTHROPIC_API_KEY) {
+    if (!raw.claude) raw.claude = {};
+    raw.claude.apiKey = process.env.ANTHROPIC_API_KEY;
+  }
+  if (process.env.CLAUDE_MODEL) {
+    if (!raw.claude) raw.claude = {};
+    if (!raw.claude.models) raw.claude.models = {};
+    raw.claude.models.reasoning = process.env.CLAUDE_MODEL;
+  }
+
   return raw;
 }
 

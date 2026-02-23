@@ -1374,6 +1374,61 @@ export const BUILT_IN_TOOLS: ToolDeclaration[] = [
       properties: {},
     },
   },
+  // === Memory Bank (structured long-term memory) ===
+  {
+    name: "memory_store_typed",
+    description: "Store a structured memory with type and importance. Types: episodic (events), semantic (facts), procedural (how-to), preference (user likes).",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The memory content to store" },
+        memory_type: { type: "string", description: "Memory type: episodic, semantic, procedural, preference" },
+        source: { type: "string", description: "Source context (e.g. conversation, tool, observation)" },
+        importance: { type: "number", description: "Importance score 1-10 (default: 5). Higher = more resistant to decay" },
+        tags: { type: "string", description: "Comma-separated tags for categorization" },
+      },
+      required: ["text", "memory_type"],
+    },
+  },
+  {
+    name: "memory_reflect",
+    description: "Consolidate memories by merging duplicates (cosine > 0.9) and extracting patterns. Run periodically to keep memory clean.",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "memory_forget",
+    description: "Remove memories that match a query. Uses semantic similarity to find and delete matching entries.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What to forget (semantic match)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "memory_list_categories",
+    description: "List memory counts broken down by type (episodic, semantic, procedural, preference).",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "memory_get_context",
+    description: "Retrieve relevant memories for a query, formatted as context for conversation.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Context query to find relevant memories" },
+        limit: { type: "number", description: "Max memories to return (default: 5)" },
+      },
+      required: ["query"],
+    },
+  },
   // === Cross-Model Delegation ===
   {
     name: "delegate_to_model",

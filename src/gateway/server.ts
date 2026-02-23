@@ -280,6 +280,26 @@ export async function startGateway(opts: GatewayOpts) {
     await startWhatsApp(agent, runtimeDir, apiKeyInstance);
   }
 
+  // Start Email channel
+  if (config.channels.email?.enabled && process.env.AGENTMAIL_API_KEY) {
+    try {
+      const { startEmailChannel } = await import("../channels/email/adapter.js");
+      startEmailChannel(agent, runtimeDir, config.channels.email.port);
+    } catch (err) {
+      log.warn("Email channel failed to start: %s", err);
+    }
+  }
+
+  // Start Phone channel
+  if (config.channels.phone?.enabled && process.env.TELNYX_API_KEY) {
+    try {
+      const { startPhoneChannel } = await import("../channels/phone/adapter.js");
+      startPhoneChannel(agent, runtimeDir, config.channels.phone.port);
+    } catch (err) {
+      log.warn("Phone channel failed to start: %s", err);
+    }
+  }
+
   // Start A2A server
   const a2aPort = 4002;
   const a2aServer = new A2AServer(runtimeDir, soulDir, config.agent.name, agent);
@@ -288,6 +308,8 @@ export async function startGateway(opts: GatewayOpts) {
   // Print startup summary
   const telegramStatus = config.channels.telegram?.enabled ? "enabled" : "disabled";
   const whatsappStatus = config.channels.whatsapp?.enabled ? "enabled" : "disabled";
+  const emailStatus = config.channels.email?.enabled && process.env.AGENTMAIL_API_KEY ? "enabled" : "disabled";
+  const phoneStatus = config.channels.phone?.enabled && process.env.TELNYX_API_KEY ? "enabled" : "disabled";
   const aiBackend = apiKeyInstance.startsWith("vertex:")
     ? `Vertex AI (${apiKeyInstance.replace("vertex:", "")})`
     : "Gemini API";
@@ -310,6 +332,8 @@ export async function startGateway(opts: GatewayOpts) {
   Antigravity: ready (Google Account auth)
   Telegram:   ${telegramStatus}
   WhatsApp:   ${whatsappStatus}
+  Email:      ${emailStatus}
+  Phone:      ${phoneStatus}
   `);
 
   // Handle shutdown

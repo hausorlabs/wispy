@@ -182,6 +182,16 @@ export class ToolExecutor {
           return this.executeMemorySearch(tool.args);
         case "memory_save":
           return this.executeMemorySave(tool.args);
+        case "memory_store_typed":
+          return this.executeMemoryStoreTyped(tool.args);
+        case "memory_reflect":
+          return this.executeMemoryReflect();
+        case "memory_forget":
+          return this.executeMemoryForget(tool.args);
+        case "memory_list_categories":
+          return this.executeMemoryListCategories();
+        case "memory_get_context":
+          return this.executeMemoryGetContext(tool.args);
         case "web_fetch":
           return this.executeWebFetch(tool.args);
         case "web_search":
@@ -669,6 +679,99 @@ export class ToolExecutor {
     appendToMemory(this.soulDir, category, fact);
     appendDailyNote(this.soulDir, `Saved memory: ${fact.slice(0, 80)}`);
     return { success: true, output: `Saved to memory [${category}]: ${fact}` };
+  }
+
+  // ── Memory Bank Handlers ──────────────────────────────────────────────
+
+  private async executeMemoryStoreTyped(args: Record<string, unknown>): Promise<ToolResult> {
+    const text = String(args.text || "");
+    const memoryType = String(args.memory_type || "semantic") as any;
+    const source = String(args.source || "agent");
+    const importance = args.importance ? Number(args.importance) : 5;
+    const tags = args.tags ? String(args.tags).split(",").map(t => t.trim()) : [];
+
+    if (!text) return { success: false, output: "", error: "No text provided" };
+
+    const validTypes = ["episodic", "semantic", "procedural", "preference"];
+    if (!validTypes.includes(memoryType)) {
+      return { success: false, output: "", error: `Invalid type: ${memoryType}. Use: ${validTypes.join(", ")}` };
+    }
+
+    try {
+      const { MemoryBank } = await import("../memory/memory-bank.js");
+      const bank = new MemoryBank(this.runtimeDir, this.config);
+      await bank.storeMemory(text, memoryType, source, { importance, tags });
+      return { success: true, output: `Stored ${memoryType} memory (importance=${importance}): ${text.slice(0, 100)}` };
+    } catch (err) {
+      return { success: false, output: "", error: `Failed to store memory: ${(err as Error).message}` };
+    }
+  }
+
+  private async executeMemoryReflect(): Promise<ToolResult> {
+    try {
+      const { MemoryBank } = await import("../memory/memory-bank.js");
+      const bank = new MemoryBank(this.runtimeDir, this.config);
+      const { merged, patterns } = await bank.reflect();
+
+      if (merged === 0) {
+        return { success: true, output: "Reflection complete. No similar memories found to merge." };
+      }
+
+      const output = `Reflection complete. Merged ${merged} memory pair(s).\n\nPatterns:\n${patterns.join("\n")}`;
+      return { success: true, output };
+    } catch (err) {
+      return { success: false, output: "", error: `Reflection failed: ${(err as Error).message}` };
+    }
+  }
+
+  private async executeMemoryForget(args: Record<string, unknown>): Promise<ToolResult> {
+    const query = String(args.query || "");
+    if (!query) return { success: false, output: "", error: "No query provided" };
+
+    try {
+      const { MemoryBank } = await import("../memory/memory-bank.js");
+      const bank = new MemoryBank(this.runtimeDir, this.config);
+      const deleted = await bank.forget(query);
+      return { success: true, output: `Forgot ${deleted} memory/memories matching: "${query}"` };
+    } catch (err) {
+      return { success: false, output: "", error: `Forget failed: ${(err as Error).message}` };
+    }
+  }
+
+  private async executeMemoryListCategories(): Promise<ToolResult> {
+    try {
+      const { MemoryBank } = await import("../memory/memory-bank.js");
+      const bank = new MemoryBank(this.runtimeDir, this.config);
+      const counts = bank.listCategories();
+
+      const total = Object.values(counts).reduce((s, n) => s + n, 0);
+      const lines = [
+        `Memory Bank: ${total} total memories`,
+        "",
+        `  Episodic (events):     ${counts.episodic}`,
+        `  Semantic (facts):      ${counts.semantic}`,
+        `  Procedural (how-to):   ${counts.procedural}`,
+        `  Preference (likes):    ${counts.preference}`,
+      ];
+      return { success: true, output: lines.join("\n") };
+    } catch (err) {
+      return { success: false, output: "", error: `List categories failed: ${(err as Error).message}` };
+    }
+  }
+
+  private async executeMemoryGetContext(args: Record<string, unknown>): Promise<ToolResult> {
+    const query = String(args.query || "");
+    const limit = args.limit ? Number(args.limit) : 5;
+    if (!query) return { success: false, output: "", error: "No query provided" };
+
+    try {
+      const { MemoryBank } = await import("../memory/memory-bank.js");
+      const bank = new MemoryBank(this.runtimeDir, this.config);
+      const context = await bank.getContextMemories(query, limit);
+      return { success: true, output: context || "No relevant memories found." };
+    } catch (err) {
+      return { success: false, output: "", error: `Get context failed: ${(err as Error).message}` };
+    }
   }
 
   private async executeWebFetch(args: Record<string, unknown>): Promise<ToolResult> {

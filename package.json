@@ -1,6 +1,6 @@
 {
   "name": "wispy-ai",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Autonomous AI agent with sessions, process management, skills.sh registry, cross-model delegation, 42+ integrations, and x402 agentic commerce",
   "type": "module",
   "bin": {
@@ -70,6 +70,7 @@
     "url": "https://github.com/hausorlabs/wispy/issues"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@coinbase/coinbase-sdk": "^0.25.0",
     "@coinbase/x402": "^2.1.0",
     "@google-cloud/speech": "^6.7.0",

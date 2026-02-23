@@ -55,6 +55,36 @@ export async function loadIntegrations(
     }
   }
 
+  // Auto-enable ElevenLabs when ELEVENLABS_API_KEY is detected
+  if (process.env.ELEVENLABS_API_KEY && !enabledIds.includes("elevenlabs")) {
+    try {
+      await registry.enable("elevenlabs");
+      log.info("Auto-enabled elevenlabs (ELEVENLABS_API_KEY detected)");
+    } catch (err) {
+      log.warn("Failed to auto-enable elevenlabs: %s", err);
+    }
+  }
+
+  // Auto-enable Agentmail when AGENTMAIL_API_KEY is detected
+  if (process.env.AGENTMAIL_API_KEY && !enabledIds.includes("agentmail")) {
+    try {
+      await registry.enable("agentmail");
+      log.info("Auto-enabled agentmail (AGENTMAIL_API_KEY detected)");
+    } catch (err) {
+      log.warn("Failed to auto-enable agentmail: %s", err);
+    }
+  }
+
+  // Auto-enable Telnyx when TELNYX_API_KEY is detected
+  if (process.env.TELNYX_API_KEY && !enabledIds.includes("telnyx")) {
+    try {
+      await registry.enable("telnyx");
+      log.info("Auto-enabled telnyx (TELNYX_API_KEY detected)");
+    } catch (err) {
+      log.warn("Failed to auto-enable telnyx: %s", err);
+    }
+  }
+
   if (registry.enabledCount > 0) {
     log.info("Enabled %d integration(s)", registry.enabledCount);
   }
@@ -103,6 +133,7 @@ async function importAllIntegrations(ctx: IntegrationContext): Promise<Integrati
   await importSafe("./ai-models/groq.js");
   await importSafe("./ai-models/openrouter.js");
   await importSafe("./ai-models/kimi.js");
+  await importSafe("./ai-models/elevenlabs.js");
 
   // Productivity
   await importSafe("./productivity/notion.js");
@@ -129,6 +160,8 @@ async function importAllIntegrations(ctx: IntegrationContext): Promise<Integrati
   await importSafe("./social/linkedin.js");
   await importSafe("./social/instagram.js");
   await importSafe("./social/reddit.js");
+  await importSafe("./social/agentmail.js");
+  await importSafe("./social/telnyx.js");
 
   // Chat (extended)
   await importSafe("./chat/signal.js");

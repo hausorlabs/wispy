@@ -358,6 +358,65 @@ export const INTEGRATION_GUIDES: IntegrationGuide[] = [
       "No configuration required",
     ],
   },
+
+  // === EMAIL ===
+  {
+    id: "agentmail",
+    name: "Agentmail",
+    icon: "📨",
+    category: "messaging",
+    description: "AI-native email for agents. Create inboxes, send/receive, thread management.",
+    authType: "token",
+    envVars: ["AGENTMAIL_API_KEY"],
+    setupSteps: [
+      "Go to agentmail.to and create an account",
+      "Navigate to API Keys in your dashboard",
+      "Create a new API key",
+      "Copy the API key and paste it below",
+    ],
+    links: [{ name: "Agentmail", url: "https://agentmail.to" }],
+    testCommand: "Ask Wispy: 'list my agentmail inboxes'",
+  },
+
+  // === VOICE ===
+  {
+    id: "elevenlabs",
+    name: "ElevenLabs",
+    icon: "🎙️",
+    category: "ai",
+    description: "Voice AI -- high-quality text-to-speech, speech-to-text, and voice cloning.",
+    authType: "token",
+    envVars: ["ELEVENLABS_API_KEY"],
+    setupSteps: [
+      "Go to elevenlabs.io and create an account",
+      "Navigate to Profile → API Keys",
+      "Create a new API key",
+      "Copy the API key and paste it below",
+      "ElevenLabs will auto-detect as your TTS engine",
+    ],
+    links: [{ name: "ElevenLabs", url: "https://elevenlabs.io" }],
+    testCommand: "Ask Wispy: 'list available elevenlabs voices'",
+  },
+
+  // === TELEPHONY ===
+  {
+    id: "telnyx",
+    name: "Telnyx",
+    icon: "📞",
+    category: "messaging",
+    description: "Carrier-grade telephony -- voice calls, SMS, and phone number management.",
+    authType: "token",
+    envVars: ["TELNYX_API_KEY"],
+    setupSteps: [
+      "Go to portal.telnyx.com and create an account",
+      "Navigate to Auth → API Keys",
+      "Create a new API key (v2)",
+      "Copy the API key and paste it below",
+      "Optionally set TELNYX_CONNECTION_ID for outbound calls",
+    ],
+    links: [{ name: "Telnyx Portal", url: "https://portal.telnyx.com" }],
+    testCommand: "Ask Wispy: 'list my telnyx phone numbers'",
+  },
 ];
 
 // ==================== WIZARD CLASS ====================

@@ -7,30 +7,26 @@ dist/
 .wispy/
 *.log
 
-# Internal docs (kept locally)
-DEMO_SCRIPT.md
-HACKATHON_BATTLE_PLAN.md
-SCREENSHOTS_GUIDE.md
-STRATEGIC_TRACKS.md
-SUBMISSIONS.md
-DORAHACKS_SUBMISSION.md
-HACKATHON_PLAN.md
-HACKATHON_IMPLEMENT.md
-BUIDL_SUBMISSION.md
+# Internal docs (moved to docs/submissions/)
+docs/submissions/
 KNOWLEDGE.md
 GETTING_STARTED.md
 USE_CASES.md
 WHAT_WE_SOLVE.md
-AUTONOMOUS_VISION.md
 PRODUCTION_READY.md
-copy-tests.ps1
+STRATEGIC_TRACKS.md
+SUBMISSIONS.md
+HACKATHON_BATTLE_PLAN.md
 
 # Memory files (runtime, not shipped)
 wispy/memory/*.md
 
 # Generated / local-only
 browser-profiles.db
+demo-live-output.txt
 screenshots/
+frontend/.next/
+frontend/node_modules/
 frontend/README.md
 src/integrations/agentic-commerce/README.md
 
@@ -39,3 +35,7 @@ gen-lang-client-*.json
 *.pem
 *.key
 nul
+
+# Unused stubs
+database/
+backend/

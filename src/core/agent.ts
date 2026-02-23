@@ -1,4 +1,4 @@
-import { generate, generateStream, type GenerateOptions } from "../ai/gemini.js";
+import { generate, generateStream, type GenerateOptions } from "../ai/engine.js";
 import { routeTask, type TaskType } from "../ai/router.js";
 import { buildSystemPrompt } from "../ai/prompts.js";
 import { getToolDeclarations } from "../ai/tools.js";
@@ -443,8 +443,16 @@ export class Agent {
     const integrationCtx = this.buildIntegrationContext();
     const baseSystemPrompt = buildSystemPrompt(soulDir, sessionType, undefined, integrationCtx);
 
+    // Memory Bank context injection: retrieve relevant memories
+    let memoryContext = "";
+    try {
+      const { MemoryBank } = await import("../memory/memory-bank.js");
+      const bank = new MemoryBank(runtimeDir, config);
+      memoryContext = await bank.getContextMemories(userMessage, 5);
+    } catch { /* non-fatal — MemoryBank may not be populated yet */ }
+
     // Add context isolation to prevent task bleeding
-    const systemPrompt = `${baseSystemPrompt}\n\n${contextPrompt}`;
+    const systemPrompt = `${baseSystemPrompt}${memoryContext ? "\n\n" + memoryContext : ""}\n\n${contextPrompt}`;
 
     // Auto-compact if context is getting full
     const compactResult = await this.autoCompactIfNeeded(agentId, session.sessionKey, rawMessages, systemPrompt);

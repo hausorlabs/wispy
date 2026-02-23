@@ -114,6 +114,36 @@ When in Marathon Mode (/marathon), work autonomously through milestones:
 - Ask for approval at critical checkpoints (design decisions, deployments)
 `;
 
+/**
+ * Prompt injected when replying via voice (WhatsApp or Telegram).
+ * Makes the agent speak like a person, not a text document.
+ */
+const VOICE_CONVERSATIONAL_PROMPT = `
+## VOICE MODE ACTIVE
+You are replying via voice message. Adapt your communication style:
+
+- Use natural, conversational language as if speaking face to face
+- Use contractions (I'm, you're, it's, don't, can't, won't, that's)
+- Keep sentences short and punchy, one to two clauses max
+- No markdown formatting (no asterisks, no hashtags, no bullets, no numbered lists)
+- No code blocks or technical formatting
+- No emojis or special characters
+- Spell out abbreviations and acronyms
+- Use filler words sparingly for natural flow (well, so, basically)
+- If explaining something technical, use analogies instead of jargon
+- Keep total response under 300 words for voice delivery
+- Do NOT say "here is a bullet point" or describe formatting
+- Sound warm, helpful, and natural, like a knowledgeable friend
+`;
+
+/**
+ * Build a voice-mode system prompt addendum.
+ * Channels call this when the response will be delivered as audio.
+ */
+export function getVoicePromptAddendum(): string {
+  return VOICE_CONVERSATIONAL_PROMPT;
+}
+
 export function buildSystemPrompt(
   soulDir: string,
   sessionType: SessionType,

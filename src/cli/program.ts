@@ -29,15 +29,19 @@ loadEnv(PKG_ROOT);
 loadEnv(RUNTIME_DIR.replace(/[/\\]\.wispy$/, ""));
 
 /**
- * Initialize Gemini with either Vertex AI or API key based on config
- * Returns the API key or "vertex:{project}" marker for marathon service
+ * Initialize Gemini with either Vertex AI or API key based on config.
+ * Also initializes the engine abstraction layer (Gemini or Claude).
+ * Returns the API key or "vertex:{project}" marker for marathon service.
  */
 async function initGeminiFromConfig(): Promise<string> {
   const { loadConfig } = await import("../config/config.js");
   const { initGemini } = await import("../ai/gemini.js");
+  const { initEngine } = await import("../ai/engine.js");
 
   const config = loadConfig(RUNTIME_DIR);
   const vertexConfig = config.gemini?.vertexai;
+
+  let geminiKey: string | undefined;
 
   if (vertexConfig?.enabled) {
     const project = vertexConfig.project || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
@@ -46,15 +50,32 @@ async function initGeminiFromConfig(): Promise<string> {
       throw new Error("Vertex AI enabled but project not set. Set gemini.vertexai.project in config or GOOGLE_CLOUD_PROJECT env var.");
     }
     initGemini({ vertexai: true, project, location });
-    return `vertex:${project}`;
+    geminiKey = `vertex:${project}`;
   } else {
     const apiKey = config.gemini?.apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
+    if (!apiKey && config.engine !== "claude") {
       throw new Error("GEMINI_API_KEY not set. Run 'wispy setup' or set the environment variable.");
     }
-    initGemini(apiKey);
-    return apiKey;
+    if (apiKey) {
+      initGemini(apiKey);
+      geminiKey = apiKey;
+    }
   }
+
+  // Initialize engine abstraction (sets active engine + inits Claude if needed)
+  const claudeKey = config.claude?.apiKey || process.env.ANTHROPIC_API_KEY;
+  await initEngine({
+    engine: config.engine,
+    geminiApiKey: geminiKey?.startsWith("vertex:") ? undefined : geminiKey,
+    claudeApiKey: claudeKey,
+    vertexai: vertexConfig?.enabled ? {
+      enabled: true,
+      project: vertexConfig.project,
+      location: vertexConfig.location,
+    } : undefined,
+  });
+
+  return geminiKey || "claude";
 }
 
 const program = new Command();

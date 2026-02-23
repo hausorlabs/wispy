@@ -15,7 +15,7 @@ import { createLogger } from "../../infra/logger.js";
 
 const log = createLogger("tts");
 
-export type TtsEngine = "piper" | "espeak" | "google-tts";
+export type TtsEngine = "piper" | "espeak" | "google-tts" | "elevenlabs";
 
 /**
  * Check if piper TTS is available.
@@ -126,6 +126,81 @@ export async function speakEspeak(text: string): Promise<void> {
 }
 
 /**
+ * Speak text using ElevenLabs API (high quality, cloud-based).
+ */
+export async function speakElevenLabs(text: string, voiceId?: string): Promise<void> {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) throw new Error("ELEVENLABS_API_KEY not set");
+
+  const voice = voiceId || "21m00Tcm4TlvDq8ikWAM"; // Rachel
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`, {
+    method: "POST",
+    headers: {
+      "xi-api-key": apiKey,
+      "Content-Type": "application/json",
+      "Accept": "audio/mpeg",
+    },
+    body: JSON.stringify({
+      text,
+      model_id: "eleven_monolingual_v1",
+      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+    }),
+  });
+
+  if (!res.ok) throw new Error(`ElevenLabs TTS failed: ${res.status}`);
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const { writeFileSync } = await import("fs");
+  const tmpFile = `${tmpdir()}/wispy-elevenlabs-${Date.now()}.mp3`;
+  writeFileSync(tmpFile, buffer);
+
+  await playAudio(tmpFile);
+  try { unlinkSync(tmpFile); } catch {}
+}
+
+/**
+ * Generate TTS audio buffer via ElevenLabs API.
+ * Returns raw MP3 buffer (no file I/O). Used by channel adapters (WhatsApp, Telegram).
+ */
+export async function generateElevenLabsBuffer(
+  text: string,
+  voiceId?: string,
+  modelId?: string
+): Promise<Buffer | null> {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) return null;
+
+  const voice = voiceId || "21m00Tcm4TlvDq8ikWAM"; // Rachel
+  const model = modelId || "eleven_monolingual_v1";
+
+  try {
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`, {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text: text.slice(0, 1000),
+        model_id: model,
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    });
+
+    if (!res.ok) {
+      log.warn("ElevenLabs TTS buffer failed: %d", res.status);
+      return null;
+    }
+
+    return Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    log.debug("ElevenLabs buffer generation failed: %s", err);
+    return null;
+  }
+}
+
+/**
  * Play a WAV file using the system audio player.
  */
 function playAudio(filePath: string): Promise<void> {
@@ -169,6 +244,8 @@ export async function speak(
     case "google-tts":
       log.warn("Google TTS not yet implemented, falling back to espeak");
       return speakEspeak(truncated);
+    case "elevenlabs":
+      return speakElevenLabs(truncated);
     default:
       return speakEspeak(truncated);
   }
@@ -178,6 +255,7 @@ export async function speak(
  * Get the best available TTS engine.
  */
 export function detectTtsEngine(): TtsEngine {
+  if (process.env.ELEVENLABS_API_KEY) return "elevenlabs";
   if (isPiperAvailable()) return "piper";
   if (isEspeakAvailable()) return "espeak";
   return "espeak"; // fallback
@@ -308,7 +386,27 @@ export async function generateVoiceWithGemini(
   outputDir: string,
   apiKey?: string
 ): Promise<string | null> {
-  // Try Gemini's native audio generation first
+  // Try ElevenLabs first (highest quality natural voice)
+  try {
+    const elevenLabsBuffer = await generateElevenLabsBuffer(text);
+    if (elevenLabsBuffer) {
+      const { join } = await import("path");
+      const { writeFileSync, mkdirSync, existsSync } = await import("fs");
+
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+
+      const elOutputFile = join(outputDir, `voice-elevenlabs-${Date.now()}.mp3`);
+      writeFileSync(elOutputFile, elevenLabsBuffer);
+      log.info("Generated voice with ElevenLabs: %s", elOutputFile);
+      return elOutputFile;
+    }
+  } catch (err) {
+    log.debug("ElevenLabs TTS not available, trying Gemini: %s", err);
+  }
+
+  // Try Gemini's native audio generation
   try {
     const { getClient } = await import("../../ai/gemini.js");
     const ai = getClient();
