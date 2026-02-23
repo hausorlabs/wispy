@@ -1,7 +1,7 @@
 {
   "name": "wispy-ai",
   "version": "1.7.0",
-  "description": "Autonomous AI agent with sessions, process management, skills.sh registry, cross-model delegation, 42+ integrations, and x402 agentic commerce",
+  "description": "Autonomous AI agent with dual engine (Gemini + Claude), Memory Bank, sessions, skills.sh registry, cross-model delegation, 42+ integrations, and x402 agentic commerce",
   "type": "module",
   "bin": {
     "wispy-ai": "./bin/wispy.js",
@@ -38,6 +38,9 @@
     "ai",
     "agent",
     "gemini",
+    "claude",
+    "anthropic",
+    "memory-bank",
     "autonomous",
     "cli",
     "multi-agent",

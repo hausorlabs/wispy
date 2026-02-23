@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Autonomous AI Agent Platform</strong><br />
-  <em>120+ tools, 42+ integrations, multi-model, sessions, skills.sh, x402 commerce</em>
+  <em>125+ tools, 42+ integrations, dual-engine (Gemini + Claude), Memory Bank, sessions, skills.sh, x402 commerce</em>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 
 ## What is Wispy?
 
-Wispy is an autonomous AI agent that lives in your terminal, messaging apps, and APIs. Powered by Google Gemini 2.5 Pro with multi-model delegation to Claude, GPT-4o, Llama, and 200+ models via OpenRouter.
+Wispy is an autonomous AI agent that lives in your terminal, messaging apps, and APIs. Dual-engine architecture powered by Google Gemini 2.5 Pro and Anthropic Claude, with cross-model delegation to GPT-4o, Llama, and 200+ models via OpenRouter. Features a structured Memory Bank with typed categories, lifecycle management, and AI-powered reflection.
 
 ```bash
 npm install -g wispy-ai
@@ -41,17 +41,21 @@ wispy chat
 
 ### Core
 
-- **120+ Built-in Tools** across file system, web, browser automation, code execution, memory, media, blockchain, and identity
+- **125+ Built-in Tools** across file system, web, browser automation, code execution, memory, media, blockchain, and identity
+- **Dual Engine** -- switch between Gemini and Claude with a single env var (`ENGINE=gemini|claude`)
+- **Memory Bank** with 4 typed categories (episodic, semantic, procedural, preference), time-based decay, reinforcement, and AI-powered reflection
 - **Marathon Mode** for multi-step, long-running autonomous tasks with checkpointing and auto-recovery
-- **Thinking Levels** (low/medium/high/ultra) with up to 24K thinking tokens
+- **Thinking Levels** (low/medium/high/ultra) with up to 24K thinking tokens (Gemini) or 32K budget tokens (Claude)
 - **Named Sessions** with isolated context, daily auto-reset, and instant switching
 - **Process Manager** to spawn, monitor, and manage background processes
 - **Skills.sh Registry** with 67,000+ community skills you can install with a single command
 
-### Multi-Model
+### Multi-Model / Dual Engine
 
-- **Gemini 2.5 Pro** (core reasoning engine)
-- **Cross-model delegation** to Claude Opus/Sonnet, GPT-4o, Groq, Kimi, Llama via Ollama, and 200+ models via OpenRouter
+- **Gemini 2.5 Pro** -- primary reasoning engine with native function calling and extended thinking
+- **Claude (Opus/Sonnet/Haiku)** -- switchable alternative engine via `@anthropic-ai/sdk` with tool_use and extended thinking
+- **Engine abstraction layer** -- seamless switching, embeddings always via Gemini
+- **Cross-model delegation** to GPT-4o, Groq, Kimi, Llama via Ollama, and 200+ models via OpenRouter
 - **Model comparison** to send the same prompt to multiple models and compare responses
 - **Setup wizard** configures all providers in one flow
 
@@ -145,10 +149,17 @@ Wispy uses `~/.wispy/config.yaml` for configuration and `.env` for secrets:
 
 ```yaml
 # config.yaml
+engine: gemini  # or "claude"
+
 gemini:
   models:
     pro: gemini-2.5-pro-preview-05-06
     flash: gemini-2.5-flash-preview-05-20
+
+claude:
+  models:
+    reasoning: claude-sonnet-4-20250514
+    fast: claude-haiku-4-5-20251001
 
 channels:
   telegram: { enabled: true }
@@ -172,10 +183,12 @@ theme: day
 
 ```bash
 # .env
+ENGINE=gemini              # Switch engine: gemini or claude
 GEMINI_API_KEY=AIza...
+ANTHROPIC_API_KEY=sk-ant-...
+CLAUDE_MODEL=claude-sonnet-4-20250514  # Optional override
 TELEGRAM_BOT_TOKEN=123456:ABC...
 AGENT_PRIVATE_KEY=0x...
-ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 ```
 
@@ -184,15 +197,21 @@ OPENAI_API_KEY=sk-...
 ## Architecture
 
 ```
-                        ┌─────────────────────────┐
-                        │   Gemini 2.5 Pro (Core)  │
-                        │   + Cross-Model Bridge   │
-                        └─────────┬───────────────┘
+              ┌──────────────────┐     ┌──────────────────┐
+              │  Gemini 2.5 Pro  │ ◄─► │  Claude (Anthropic│
+              │  (default)       │     │  (switchable)     │
+              └────────┬─────────┘     └────────┬─────────┘
+                       └──────────┬─────────────┘
+                       ┌──────────▼──────────┐
+                       │  Engine Abstraction  │
+                       │  + Memory Bank       │
+                       │  + Cross-Model Bridge│
+                       └──────────┬──────────┘
                                   │
               ┌───────────────────┼───────────────────┐
               │                   │                     │
      ┌────────▼──────┐  ┌───────▼───────┐  ┌─────────▼────────┐
-     │  120+ Tools    │  │  42+ Integs   │  │  x402 Commerce   │
+     │  125+ Tools    │  │  42+ Integs   │  │  x402 Commerce   │
      │  Sessions      │  │  Skills.sh    │  │  Payment Bridge  │
      │  Processes     │  │  Browser (39) │  │  Budget Policy   │
      └────────┬──────┘  └───────┬───────┘  └─────────┬────────┘
