@@ -200,8 +200,8 @@ program
   .description("Run first-time setup and onboarding")
   .action(async () => {
     log.info("Starting onboarding...");
-    const { runOnboarding } = await import("../gateway/boot.js");
-    await runOnboarding({ rootDir: ROOT_DIR, runtimeDir: RUNTIME_DIR, soulDir: SOUL_DIR });
+    const { runSetupWizard } = await import("./setup/wizard.js");
+    await runSetupWizard({ rootDir: ROOT_DIR, runtimeDir: RUNTIME_DIR, soulDir: SOUL_DIR });
   });
 
 // === DOCTOR ===
@@ -562,8 +562,8 @@ program
       await wizard.setup(integration);
     } else {
       // Full setup wizard
-      const { runAutomatedSetup } = await import("./setup/automated-setup.js");
-      await runAutomatedSetup({ rootDir: ROOT_DIR, runtimeDir: RUNTIME_DIR });
+      const { runSetupWizard } = await import("./setup/wizard.js");
+      await runSetupWizard({ rootDir: ROOT_DIR, runtimeDir: RUNTIME_DIR, soulDir: SOUL_DIR });
     }
   });
 
